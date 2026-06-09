@@ -37,137 +37,34 @@ with col3:
 
 st.markdown("---")
 
-# --- 💡 マトリックス形式フォーメーション入力 ---
+# --- 💡 スマホ特化型：フォーメーション入力 ---
 st.markdown("### 🎯 あなたの予想（フォーメーション）")
-st.caption("※入力しなくても類似レースの検索は可能です")
+st.write("タップして号艇を選ぶか、スイッチで「全通り」にできます。")
 
-# 🛠️ スマホでも絶対に1画面（横スクロールなし）に収めるための強力なCSS
-st.markdown("""
-<style>
-/* 1行の親コンテナを「強制横並び・折り返し禁止」に設定し、幅を100%に完全固定 */
-div[data-testid="stHorizontalBlock"]:has(.boat-badge),
-div[data-testid="stHorizontalBlock"]:has(.matrix-header) {
-    display: flex !important;
-    flex-direction: row !important;
-    flex-wrap: nowrap !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    padding: 0 !important;
-    margin: 0 !important;
-}
+# スマホでは自動的に縦に並ぶ安全なレイアウト
+c1, c2, c3 = st.columns(3)
 
-/* 1列目（号艇バッジ）の幅を約28%に強制固定 */
-div[data-testid="stHorizontalBlock"]:has(.boat-badge) > div[data-testid="column"]:nth-child(1),
-div[data-testid="stHorizontalBlock"]:has(.matrix-header) > div[data-testid="column"]:nth-child(1) {
-    width: 28% !important;
-    flex: 0 0 28% !important;
-    min-width: 0 !important;
-    padding: 0 2px !important;
-}
+boat_options = [1, 2, 3, 4, 5, 6]
 
-/* 2〜4列目（着順チェックボックス）の幅を残りの約24%ずつに強制固定 */
-div[data-testid="stHorizontalBlock"]:has(.boat-badge) > div[data-testid="column"]:nth-child(n+2),
-div[data-testid="stHorizontalBlock"]:has(.matrix-header) > div[data-testid="column"]:nth-child(n+2) {
-    width: 24% !important;
-    flex: 0 0 24% !important;
-    min-width: 0 !important;
-    padding: 0 2px !important;
-}
+with c1:
+    st.markdown("#### 🥇 1着")
+    all_1 = st.toggle("【全】通りにする", key="all_1")
+    sel_1 = st.multiselect("1着の号艇", boat_options, disabled=all_1, label_visibility="collapsed", placeholder="号艇を選択...")
+    pred_1 = boat_options if all_1 else sel_1
 
-/* チェックボックスの無駄な余白を消滅させて中央に配置 */
-.stCheckbox {
-    display: flex !important;
-    justify-content: center !important;
-    align-items: center !important;
-    min-height: 30px !important;
-}
-.stCheckbox > label {
-    padding: 0 !important;
-    margin: 0 !important;
-    min-height: 0 !important;
-}
-/* ラベルテキスト（非表示） */
-.stCheckbox div[data-testid="stMarkdownContainer"] {
-    display: none !important;
-}
+with c2:
+    st.markdown("#### 🥈 2着")
+    all_2 = st.toggle("【全】通りにする", key="all_2")
+    sel_2 = st.multiselect("2着の号艇", boat_options, disabled=all_2, label_visibility="collapsed", placeholder="号艇を選択...")
+    pred_2 = boat_options if all_2 else sel_2
 
-/* 表ヘッダー文字（改行させない） */
-.matrix-header {
-    text-align: center;
-    font-weight: bold;
-    font-size: 13px;
-    white-space: nowrap;
-}
+with c3:
+    st.markdown("#### 🥉 3着")
+    all_3 = st.toggle("【全】通りにする", key="all_3")
+    sel_3 = st.multiselect("3着の号艇", boat_options, disabled=all_3, label_visibility="collapsed", placeholder="号艇を選択...")
+    pred_3 = boat_options if all_3 else sel_3
 
-/* 号艇バッジのサイズと文字位置 */
-.boat-badge {
-    display: block;
-    text-align: center;
-    font-weight: bold;
-    font-size: 14px;
-    height: 30px;
-    line-height: 30px;
-    border-radius: 4px;
-    width: 100%; 
-    max-width: 60px; /* 広がりすぎ防止 */
-    margin: 0 auto;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# テレボート公式カラー定義
-boat_styles = {
-    1: "background-color: #ffffff; color: #000000; border: 1px solid #aaaaaa;", 
-    2: "background-color: #000000; color: #ffffff;",                          
-    3: "background-color: #e02020; color: #ffffff;",                          
-    4: "background-color: #0055b8; color: #ffffff;",                          
-    5: "background-color: #fbd100; color: #000000;",                          
-    6: "background-color: #00a040; color: #ffffff;",                          
-    "全": "background-color: #555555; color: #ffffff;"
-}
-
-# --- 🔄 セッション状態の初期化と双方向連動ロジック ---
-for p in [1, 2, 3]:
-    for i in range(1, 7):
-        if f"boat_{p}_{i}" not in st.session_state:
-            st.session_state[f"boat_{p}_{i}"] = False
-    if f"all_{p}" not in st.session_state:
-        st.session_state[f"all_{p}"] = False
-
-def click_all(p):
-    new_val = st.session_state[f"all_{p}"]
-    for i in range(1, 7):
-        st.session_state[f"boat_{p}_{i}"] = new_val
-
-def click_boat(p):
-    st.session_state[f"all_{p}"] = all(st.session_state[f"boat_{p}_{i}"] for i in range(1, 7))
-
-# --- マトリックス表のレンダリング ---
-head_cols = st.columns([1.2, 1, 1, 1])
-head_cols[0].markdown("<div class='matrix-header'>号艇</div>", unsafe_allow_html=True)
-head_cols[1].markdown("<div class='matrix-header'>1着</div>", unsafe_allow_html=True)
-head_cols[2].markdown("<div class='matrix-header'>2着</div>", unsafe_allow_html=True)
-head_cols[3].markdown("<div class='matrix-header'>3着</div>", unsafe_allow_html=True)
-st.markdown("<hr style='margin: 2px 0; border: 0; border-top: 1px solid #555555;'>", unsafe_allow_html=True)
-
-for i in range(1, 7):
-    row_cols = st.columns([1.2, 1, 1, 1])
-    row_cols[0].markdown(f"<div class='boat-badge' style='{boat_styles[i]}'>{i}</div>", unsafe_allow_html=True)
-    row_cols[1].checkbox("", key=f"boat_1_{i}", on_change=click_boat, args=(1,))
-    row_cols[2].checkbox("", key=f"boat_2_{i}", on_change=click_boat, args=(2,))
-    row_cols[3].checkbox("", key=f"boat_3_{i}", on_change=click_boat, args=(3,))
-    st.markdown("<hr style='margin: 2px 0; border: 0; border-top: 1px solid #333333;'>", unsafe_allow_html=True)
-
-row_all_cols = st.columns([1.2, 1, 1, 1])
-row_all_cols[0].markdown(f"<div class='boat-badge' style='{boat_styles['全']}'>全</div>", unsafe_allow_html=True)
-row_all_cols[1].checkbox("", key="all_1", on_change=click_all, args=(1,))
-row_all_cols[2].checkbox("", key="all_2", on_change=click_all, args=(2,))
-row_all_cols[3].checkbox("", key="all_3", on_change=click_all, args=(3,))
-st.markdown("<hr style='margin: 2px 0; border: 0; border-top: 1px solid #555555;'>", unsafe_allow_html=True)
-
-pred_1 = [i for i in range(1, 7) if st.session_state[f"boat_1_{i}"]]
-pred_2 = [i for i in range(1, 7) if st.session_state[f"boat_2_{i}"]]
-pred_3 = [i for i in range(1, 7) if st.session_state[f"boat_3_{i}"]]
+st.markdown("---")
 
 # --- 2. データ取得関数 ---
 def fetch_boat_data(hd, jcd, rno):
@@ -193,22 +90,14 @@ def fetch_boat_data(hd, jcd, rno):
     return rates, relative_rates
 
 # --- 3. 実行処理 ---
-if st.button("出走表を取得して類似100レースを検索 🔍", use_container_width=True):
+if st.button("予想結果を見る 🔍", use_container_width=True):
     
-    with st.spinner("公式サイトからデータを取得中..."):
+    with st.spinner("データを取得・計算中..."):
         raw_rates, rel_rates = fetch_boat_data(hd_str, jcd_str, rno_str)
         
     if raw_rates is None:
         st.error("指定されたレースの出走表データが取得できませんでした。")
     else:
-        st.success("データ取得成功！")
-        
-        st.markdown("#### 📥 取得した勝率データ")
-        cols = st.columns(6)
-        for i in range(6):
-            cols[i].metric(label=f"{i+1}号艇", value=f"{raw_rates[i]}", delta=f"{rel_rates[i]} (相対)")
-        st.markdown("---")
-
         file_path = f"{selected_venue}.csv"
         if os.path.exists(file_path):
             df = pd.read_csv(file_path, encoding='utf-8-sig')
@@ -219,10 +108,56 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
             df['距離'] = np.linalg.norm(past_patterns - user_pattern, axis=1)
             similar_100 = df.sort_values('距離').head(100)
 
-            # ----------------------------------------------------
-            # 📈 配当分布グラフ（金額帯）
-            # ----------------------------------------------------
-            st.markdown("### 📈 類似100レースの配当分布（金額帯）")
+            def make_result_str(row):
+                return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
+            similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
+
+            # ====================================================
+            # ① あなたの予想結果 ＆ 予想内ベスト5
+            # ====================================================
+            st.markdown("## 🎯 あなたの予想結果")
+            
+            if pred_1 and pred_2 and pred_3:
+                raw_combos = list(itertools.product(pred_1, pred_2, pred_3))
+                valid_combos = [f"{c[0]}-{c[1]}-{c[2]}" for c in raw_combos if len(set(c)) == 3]
+                
+                if valid_combos:
+                    my_hits = similar_100[similar_100['3連単'].isin(valid_combos)]
+                    my_count = len(my_hits)
+                    
+                    # 合算出現率をドカンと表示
+                    st.info(f"あなたの買い目（計**{len(valid_combos)}点**）の合算出現率: **{my_count}%**")
+                    
+                    if my_count > 0:
+                        st.markdown("#### 🌟 予想内の頻出着順ベスト5")
+                        my_best = my_hits['3連単'].value_counts().head(5)
+                        
+                        for i, (result, count) in enumerate(my_best.items()):
+                            st.success(f"**第{i+1}位：【 {result} 】** （出現率: {count}%）")
+                    else:
+                        st.warning("あなたの予想は、過去の類似100レースでは1度も発生していません。来れば大穴です！")
+                else:
+                    st.error("有効な買い目がありません（同じ号艇が重複して選択されています）。")
+            else:
+                st.warning("※フォーメーションが入力されていないため、予想結果は計算されませんでした。")
+
+            st.markdown("---")
+
+            # ====================================================
+            # ② 全体の頻出着順ベスト3
+            # ====================================================
+            st.markdown("## 🏆 全体の頻出着順ベスト3")
+            top3 = similar_100['3連単'].value_counts().head(3)
+            
+            for i, (result, count) in enumerate(top3.items()):
+                st.markdown(f"**第{i+1}位: 【 {result} 】** （出現率: {count}%）")
+                
+            st.markdown("---")
+
+            # ====================================================
+            # ③ 配当分布グラフ（金額帯）
+            # ====================================================
+            st.markdown("### 📈 類似100レースの配当分布（荒れやすさ）")
             similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
             bins = [0, 1500, 3000, 5000, 10000, 30000, 1000000]
             labels = ['~1.5k', '1.5k~3k', '3k~5k', '5k~10k', '10k~30k', '30k~']
@@ -240,49 +175,6 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                 
             st.pyplot(fig, clear_figure=True)
             st.caption("※縦軸はレース数（最大100回）。右に山があるほど荒れやすいパターンです。")
-            st.markdown("---")
-
-            def make_result_str(row):
-                return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
-            similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
-
-            # ----------------------------------------------------
-            # 🏆 頻出ベスト5（全体）
-            # ----------------------------------------------------
-            st.markdown("## 🏆 全体の頻出着順ベスト5")
-            top5 = similar_100['3連単'].value_counts().head(5)
-            
-            for i, (result, count) in enumerate(top5.items()):
-                st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%**")
-
-            # ----------------------------------------------------
-            # 🎯 答え合わせ（予想内のベスト5を表示）
-            # ----------------------------------------------------
-            if pred_1 and pred_2 and pred_3:
-                st.markdown("---")
-                st.markdown("### 🎯 あなたのフォーメーション予想結果")
-                
-                raw_combos = list(itertools.product(pred_1, pred_2, pred_3))
-                valid_combos = [f"{c[0]}-{c[1]}-{c[2]}" for c in raw_combos if len(set(c)) == 3]
-                
-                if valid_combos:
-                    my_hits = similar_100[similar_100['3連単'].isin(valid_combos)]
-                    my_count = len(my_hits)
-                    
-                    if my_count > 0:
-                        st.info(f"あなたの予想（計**{len(valid_combos)}点**）の合算出現率: **{my_count}%**")
-                        
-                        st.markdown("#### 🌟 予想内の頻出着順ベスト5")
-                        my_best = my_hits['3連単'].value_counts().head(5)
-                        
-                        # リスト形式でスッキリと表示
-                        for i, (result, count) in enumerate(my_best.items()):
-                            st.markdown(f"**第{i+1}位：【 {result} 】** （出現率: {count}%）")
-                            
-                    else:
-                        st.warning(f"あなたの予想（計{len(valid_combos)}点）は、今回の類似100レースでは1度も発生していません。来れば大穴です！")
-                else:
-                    st.error("有効な買い目がありません（同じ号艇が重複して選択されています）。")
 
         else:
             st.error(f"データファイルが見つかりません: {file_path}")
