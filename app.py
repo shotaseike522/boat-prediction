@@ -36,7 +36,7 @@ with col3:
 
 st.markdown("---")
 
-# --- 💡 新機能：マトリックス形式（テレボート風）フォーメーション入力 ---
+# --- 💡 新機能：マトリックス形式（縦：号艇、横：着順）フォーメーション入力 ---
 st.markdown("### 🎯 あなたの予想（フォーメーション）")
 st.caption("※入力しなくても類似レースの検索は可能です")
 
@@ -44,31 +44,25 @@ pred_1 = []
 pred_2 = []
 pred_3 = []
 
-# ヘッダー行（1〜6の号艇番号）
-head_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
-for i in range(1, 7):
-    head_cols[i].markdown(f"<div style='text-align: center'><b>{i}</b></div>", unsafe_allow_html=True)
+# ヘッダー行（横軸：着順）
+# 比率を [1.2, 1, 1, 1] にすることで全体の縦ラインを完璧に揃えます
+head_cols = st.columns([1.2, 1, 1, 1])
+head_cols[0].markdown("<b>号艇</b>", unsafe_allow_html=True)
+head_cols[1].markdown("<b>1着</b>", unsafe_allow_html=True)
+head_cols[2].markdown("<b>2着</b>", unsafe_allow_html=True)
+head_cols[3].markdown("<b>3着</b>", unsafe_allow_html=True)
 
-# 1着の行
-row1_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
-row1_cols[0].markdown("<b>1着</b>", unsafe_allow_html=True)
+# 縦軸：1〜6号艇のループ
 for i in range(1, 7):
-    # チェックボックスを配置し、チェックされたらリストに号艇番号を追加
-    if row1_cols[i].checkbox("", key=f"1着_{i}"):
+    row_cols = st.columns([1.2, 1, 1, 1])
+    row_cols[0].markdown(f"<b>{i}号艇</b>", unsafe_allow_html=True)
+    
+    # 各着順のチェックボックス（すべて左寄せで綺麗に直列します）
+    if row_cols[1].checkbox("", key=f"1着_{i}"):
         pred_1.append(i)
-
-# 2着の行
-row2_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
-row2_cols[0].markdown("<b>2着</b>", unsafe_allow_html=True)
-for i in range(1, 7):
-    if row2_cols[i].checkbox("", key=f"2着_{i}"):
+    if row_cols[2].checkbox("", key=f"2着_{i}"):
         pred_2.append(i)
-
-# 3着の行
-row3_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
-row3_cols[0].markdown("<b>3着</b>", unsafe_allow_html=True)
-for i in range(1, 7):
-    if row3_cols[i].checkbox("", key=f"3着_{i}"):
+    if row_cols[3].checkbox("", key=f"3着_{i}"):
         pred_3.append(i)
 
 st.markdown("---")
