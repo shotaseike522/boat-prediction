@@ -36,183 +36,165 @@ with col3:
 
 st.markdown("---")
 
-# --- 💡 新機能：マトリックス形式（補助線 ＆ テレボートカラー） ---
+# --- 💡 新機能：マトリックス形式（ズレ修正 ＆ 「全選択」機能） ---
 st.markdown("### 🎯 あなたの予想（フォーメーション）")
 st.caption("※入力しなくても類似レースの検索は可能です")
 
-# 🛠️ 画面を完全なテーブル（表）に変えるためのカスタムCSS
+# 🛠️ 画面のデザインを完璧に整えるカスタムCSS
 st.markdown("""
 <style>
+/* チェックボックスの余白を完全になくし、文字を非表示にする（中央寄せのため） */
+.stCheckbox > label {
+    padding-left: 0 !important;
+}
+.stCheckbox > div[data-testid="stMarkdownContainer"] {
+    display: none; /* ラベルを非表示 */
+}
+
 /* 行ごとの上下余白を狭くし、補助線（下線）を引く */
 div[data-testid="stHorizontalBlock"] {
     border-bottom: 1px solid #dddddd;
     padding-top: 4px !important;
     padding-bottom: 4px !important;
-    align-items: center;
+    align-items: center; /* 垂直方向の中央揃え */
 }
-/* ヘッダー行のスタイル */
+
+/* ヘッダー行のスタイル（中央揃え） */
 .matrix-header {
     text-align: center;
     font-weight: bold;
     font-size: 15px;
     color: #333333;
 }
-/* テレボート風・号艇バッジの共通スタイル */
+
+/* テレボート風・号艇バッジのスタイル */
 .boat-badge {
     display: block;
     text-align: center;
     font-weight: bold;
     font-size: 16px;
-    padding: 4px 0;
+    height: 30px; /* 高さを統一 */
+    line-height: 30px; /* 文字を垂直中央に */
     border-radius: 4px;
-    width: 80%;
+    width: 90%;
     margin: 0 auto;
 }
-/* チェックボックスの位置を中央に寄せる */
+
+/* チェックボックス（.stCheckbox）の高さをバッジと揃え、中央に寄せる */
 .stCheckbox {
     display: flex;
     justify-content: center;
+    height: 30px;
+    align-items: center;
 }
 </style>
 """, unsafe_allow_html=True)
 
+# テレボート公式のカラー配色の定義
+boat_styles = {
+    1: "background-color: #ffffff; color: #000000; border: 1px solid #aaaaaa;", # 1: 白
+    2: "background-color: #000000; color: #ffffff;",                          # 2: 黒
+    3: "background-color: #e02020; color: #ffffff;",                          # 3: 赤
+    4: "background-color: #0055b8; color: #ffffff;",                          # 4: 青
+    5: "background-color: #fbd100; color: #000000;",                          # 5: 黄
+    6: "background-color: #00a040; color: #ffffff;",                          # 6: 緑
+    "全": "background-color: #cccccc; color: #333333; font-size: 14px; padding: 2px 0;" # 全: 灰色
+}
+
+# --- 動的なチェックボックス状態の管理（セッション状態） ---
+# 初期化
+if 'pred_1_states' not in st.session_state:
+    st.session_state['pred_1_states'] = {i: False for i in range(1, 7)}
+if 'all_1_state' not in st.session_state:
+    st.session_state['all_1_state'] = False
+
+if 'pred_2_states' not in st.session_state:
+    st.session_state['pred_2_states'] = {i: False for i in range(1, 7)}
+if 'all_2_state' not in st.session_state:
+    st.session_state['all_2_state'] = False
+
+if 'pred_3_states' not in st.session_state:
+    st.session_state['pred_3_states'] = {i: False for i in range(1, 7)}
+if 'all_3_state' not in st.session_state:
+    st.session_state['all_3_state'] = False
+
+# コールバック関数 (号艇チェックボックス用)
+def update_all_checkbox(pos):
+    # 対応する着順の1〜6号艇のチェック状態を取得
+    states = st.session_state[f'pred_{pos}_states']
+    # すべてチェックされているか確認し、「全」チェックボックスの状態を更新
+    st.session_state[f'all_{pos}_state'] = all(states.values())
+
+# コールバック関数 (全チェックボックス用)
+def update_boat_checkboxes(pos):
+    # 「全」チェックボックスの新しい状態を取得
+    new_state = st.session_state[f'all_{pos}_state']
+    # 対応する着順の1〜6号艇すべてに同じ状態を適用
+    for i in range(1, 7):
+        st.session_state[f'pred_{pos}_states'][i] = new_state
+
+# --- 予想フォーメーション表の表示 ---
 pred_1 = []
 pred_2 = []
 pred_3 = []
 
 # ヘッダー行（横軸：着順）
-head_cols = st.columns([1.5, 1, 1, 1])
+# 比率を [1.2, 1, 1, 1] にすることで全体の縦ラインを完璧に揃えます
+head_cols = st.columns([1.2, 1, 1, 1])
 head_cols[0].markdown("<div class='matrix-header'>号艇</div>", unsafe_allow_html=True)
 head_cols[1].markdown("<div class='matrix-header'>1着</div>", unsafe_allow_html=True)
 head_cols[2].markdown("<div class='matrix-header'>2着</div>", unsafe_allow_html=True)
 head_cols[3].markdown("<div class='matrix-header'>3着</div>", unsafe_allow_html=True)
 
-# テレボート公式のカラー配色の定義
-boat_styles = {
-    1: "background-color: #ffffff; color: #000000; border: 1px solid #aaaaaa;", # 1号艇: 白（埋もれないよう薄い枠線）
-    2: "background-color: #000000; color: #ffffff;",                          # 2号艇: 黒（白抜き）
-    3: "background-color: #e02020; color: #ffffff;",                          # 3号艇: 赤
-    4: "background-color: #0055b8; color: #ffffff;",                          # 4号艇: 青
-    5: "background-color: #fbd100; color: #000000;",                          # 5号艇: 黄
-    6: "background-color: #00a040; color: #ffffff;"                           # 6号艇: 緑
-}
-
 # 縦軸：1〜6号艇のループ
 for i in range(1, 7):
-    row_cols = st.columns([1.5, 1, 1, 1])
+    row_cols = st.columns([1.2, 1, 1, 1])
     
     # 公式カラーを適用した数字バッジを出力
     style = boat_styles[i]
-    row_cols[0].markdown(f"<div class='boat-badge' style='{style}'>{i}</div>", unsafe_allow_html=True)
-    
-    # 各着順のチェックボックス
-    if row_cols[1].checkbox("", key=f"1着_{i}"):
-        pred_1.append(i)
-    if row_cols[2].checkbox("", key=f"2着_{i}"):
-        pred_2.append(i)
-    if row_cols[3].checkbox("", key=f"3着_{i}"):
-        pred_3.append(i)
+    row_cols[0].markdown(f"<div class='boat-badge' style='{style}'>{i}<style>
+/* チェックボックスの余白を完全になくし、文字を非表示にする（中央寄せのため） */
+.stCheckbox > label {
+    padding-left: 0 !important;
+}
+.stCheckbox > div[data-testid="stMarkdownContainer"] {
+    display: none; /* ラベルを非表示 */
+}
 
-# 表の下に少し余白を追加
-st.markdown("<br>", unsafe_allow_html=True)
+/* 行ごとの上下余白を狭くし、補助線（下線）を引く */
+div[data-testid="stHorizontalBlock"] {
+    border-bottom: 1px solid #dddddd;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    align-items: center; /* 垂直方向の中央揃え */
+}
 
-# --- 2. データ取得関数 ---
-def fetch_boat_data(hd, jcd, rno):
-    url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={hd}"
-    res = requests.get(url)
-    soup = BeautifulSoup(res.content, "html.parser")
-    syouritu_elements = soup.find_all(class_="is-lineH2")
-    
-    if not syouritu_elements or len(syouritu_elements) < 27:
-        return None, None
-        
-    rates = []
-    target_indices = [1, 6, 11, 16, 21, 26] 
-    for i in target_indices:
-        txt = syouritu_elements[i].text.split('\n')[0]
-        try:
-            rates.append(float(txt))
-        except:
-            rates.append(0.0)
-            
-    mean_rate = sum(rates) / 6
-    relative_rates = [round(r - mean_rate, 3) for r in rates]
-    return rates, relative_rates
+/* ヘッダー行のスタイル（中央揃え） */
+.matrix-header {
+    text-align: center;
+    font-weight: bold;
+    font-size: 15px;
+    color: #333333;
+}
 
-# --- 3. 実行処理 ---
-if st.button("出走表を取得して類似100レースを検索 🔍", use_container_width=True):
-    
-    with st.spinner("公式サイトからデータを取得中..."):
-        raw_rates, rel_rates = fetch_boat_data(hd_str, jcd_str, rno_str)
-        
-    if raw_rates is None:
-        st.error("指定されたレースの出走表データが取得できませんでした。")
-    else:
-        st.success("データ取得成功！")
-        
-        st.markdown("#### 📥 取得した勝率データ")
-        cols = st.columns(6)
-        for i in range(6):
-            cols[i].metric(label=f"{i+1}号艇", value=f"{raw_rates[i]}", delta=f"{rel_rates[i]} (相対)")
-        st.markdown("---")
+/* テレボート風・号艇バッジのスタイル */
+.boat-badge {
+    display: block;
+    text-align: center;
+    font-weight: bold;
+    font-size: 16px;
+    height: 30px; /* 高さを統一 */
+    line-height: 30px; /* 文字を垂直中央に */
+    border-radius: 4px;
+    width: 90%;
+    margin: 0 auto;
+}
 
-        # --- 類似レース検索処理 ---
-        file_path = f"{selected_venue}.csv"
-        if os.path.exists(file_path):
-            df = pd.read_csv(file_path, encoding='utf-8-sig')
-
-            user_pattern = np.array(rel_rates)
-            past_patterns = df[['相対勝率_1', '相対勝率_2', '相対勝率_3', '相対勝率_4', '相対勝率_5', '相対勝率_6']].values
-
-            df['距離'] = np.linalg.norm(past_patterns - user_pattern, axis=1)
-            similar_100 = df.sort_values('距離').head(100)
-
-            # 📈 配当分布
-            st.markdown("## 📈 類似100レースの配当分布（荒れやすさ）")
-            similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
-            bins = [0, 1500, 3000, 5000, 10000, 30000, 1000000]
-            labels = ['本命(~1.5千円)', '中穴(1.5~3千円)', '中穴(3~5千円)', '大穴(5千~1万円)', '万舟(1万~3万円)', '超万舟(3万円~)']
-            similar_100['配当帯'] = pd.cut(similar_100['p'], bins=bins, labels=labels, right=False)
-            
-            dist = similar_100['配当帯'].value_counts(sort=False)
-            st.bar_chart(dist)
-            st.markdown("---")
-
-            def make_result_str(row):
-                return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
-            similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
-
-            # 🏆 ベスト3
-            st.markdown("## 🏆 頻出着順ベスト3")
-            top3 = similar_100['3連単'].value_counts().head(3)
-            
-            for i, (result, count) in enumerate(top3.items()):
-                avg_payout = similar_100[similar_100['3連単'] == result]['p'].mean()
-                st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%** （平均配当: {int(avg_payout)}円）")
-
-            # --- 🎯 答え合わせ（マトリックス入力の判定） ---
-            if pred_1 and pred_2 and pred_3:
-                st.markdown("---")
-                st.markdown("### 🎯 あなたのフォーメーション予想結果")
-                
-                raw_combos = list(itertools.product(pred_1, pred_2, pred_3))
-                valid_combos = [f"{c[0]}-{c[1]}-{c[2]}" for c in raw_combos if len(set(c)) == 3]
-                
-                if valid_combos:
-                    my_hits = similar_100[similar_100['3連単'].isin(valid_combos)]
-                    my_count = len(my_hits)
-                    
-                    if my_count > 0:
-                        my_avg_payout = my_hits['p'].mean()
-                        st.info(f"あなたの予想（計**{len(valid_combos)}点**）の合算出現率: **{my_count}%**")
-                        st.info(f"的中した場合の平均配当: **{int(my_avg_payout)}円**")
-                        
-                        best_hit = my_hits['3連単'].value_counts().head(1)
-                        st.caption(f"※ちなみに、あなたの予想内で最も出やすかったのは 【 {best_hit.index[0]} 】 でした。")
-                    else:
-                        st.warning(f"あなたの予想（計{len(valid_combos)}点）は、今回の類似100レースでは1度も発生していません。来れば大穴です！")
-                else:
-                    st.error("有効な買い目がありません（同じ号艇が重複して選択されています）。")
-
-        else:
-            st.error(f"データファイルが見つかりません: {file_path}")
+/* チェックボックス（.stCheckbox）の高さをバッジと揃え、中央に寄せる */
+.stCheckbox {
+    display: flex;
+    justify-content: center;
+    height: 30px;
+    align-items: center;
+}
+</style>
