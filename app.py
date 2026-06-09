@@ -36,18 +36,40 @@ with col3:
 
 st.markdown("---")
 
-# --- 💡 新機能：フォーメーション予想入力 ---
+# --- 💡 新機能：マトリックス形式（テレボート風）フォーメーション入力 ---
 st.markdown("### 🎯 あなたの予想（フォーメーション）")
 st.caption("※入力しなくても類似レースの検索は可能です")
 
-boat_options = [1, 2, 3, 4, 5, 6]
-col4, col5, col6 = st.columns(3)
-with col4:
-    pred_1 = st.multiselect("1着", boat_options, placeholder="選択...")
-with col5:
-    pred_2 = st.multiselect("2着", boat_options, placeholder="選択...")
-with col6:
-    pred_3 = st.multiselect("3着", boat_options, placeholder="選択...")
+pred_1 = []
+pred_2 = []
+pred_3 = []
+
+# ヘッダー行（1〜6の号艇番号）
+head_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
+for i in range(1, 7):
+    head_cols[i].markdown(f"<div style='text-align: center'><b>{i}</b></div>", unsafe_allow_html=True)
+
+# 1着の行
+row1_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
+row1_cols[0].markdown("<b>1着</b>", unsafe_allow_html=True)
+for i in range(1, 7):
+    # チェックボックスを配置し、チェックされたらリストに号艇番号を追加
+    if row1_cols[i].checkbox("", key=f"1着_{i}"):
+        pred_1.append(i)
+
+# 2着の行
+row2_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
+row2_cols[0].markdown("<b>2着</b>", unsafe_allow_html=True)
+for i in range(1, 7):
+    if row2_cols[i].checkbox("", key=f"2着_{i}"):
+        pred_2.append(i)
+
+# 3着の行
+row3_cols = st.columns([1, 1, 1, 1, 1, 1, 1])
+row3_cols[0].markdown("<b>3着</b>", unsafe_allow_html=True)
+for i in range(1, 7):
+    if row3_cols[i].checkbox("", key=f"3着_{i}"):
+        pred_3.append(i)
 
 st.markdown("---")
 
@@ -125,18 +147,16 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                 avg_payout = similar_100[similar_100['3連単'] == result]['p'].mean()
                 st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%** （平均配当: {int(avg_payout)}円）")
 
-            # --- 🎯 答え合わせ（予想が入力されている場合のみ実行） ---
+            # --- 🎯 答え合わせ（マトリックス入力の判定） ---
             if pred_1 and pred_2 and pred_3:
                 st.markdown("---")
                 st.markdown("### 🎯 あなたのフォーメーション予想結果")
                 
-                # 全組み合わせを生成（itertools.productを使用）
                 raw_combos = list(itertools.product(pred_1, pred_2, pred_3))
-                # 1-1-2などの不可能な組み合わせ（重複）を除外
+                # 1-1-2などの重複を除外
                 valid_combos = [f"{c[0]}-{c[1]}-{c[2]}" for c in raw_combos if len(set(c)) == 3]
                 
                 if valid_combos:
-                    # 類似100レースの中で、作成した買い目に該当するものをすべて抽出
                     my_hits = similar_100[similar_100['3連単'].isin(valid_combos)]
                     my_count = len(my_hits)
                     
@@ -145,7 +165,6 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                         st.info(f"あなたの予想（計**{len(valid_combos)}点**）の合算出現率: **{my_count}%**")
                         st.info(f"的中した場合の平均配当: **{int(my_avg_payout)}円**")
                         
-                        # おまけ：フォーメーション内で一番出現しやすかった出目を表示
                         best_hit = my_hits['3連単'].value_counts().head(1)
                         st.caption(f"※ちなみに、あなたの予想内で最も出やすかったのは 【 {best_hit.index[0]} 】 でした。")
                     else:
