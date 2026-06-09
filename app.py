@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 # --- 画面設定 ---
 st.set_page_config(page_title="競艇 類似レース予想", layout="centered")
 st.title("🚤 競艇 類似レース予想ツール")
-st.write("公式サイトから出走表を自動取得し、過去のパターンから最も似ている100レースの確率を出します。")
+st.write("過去のパターンから最も似ている100レースの確率を出します。")
 
 venues = [
     "01_桐生", "02_戸田", "03_江戸川", "04_平和島", "05_多摩川", "06_浜名湖",
@@ -41,28 +41,32 @@ st.markdown("---")
 st.markdown("### 🎯 あなたの予想（フォーメーション）")
 st.caption("※入力しなくても類似レースの検索は可能です")
 
-# 🛠️ スマホ画面でも絶対に縦崩れさせないための最強CSSインジェクション
+# 🛠️ スマホの横幅（スクロールなし）に200%特化させたCSS
 st.markdown("""
 <style>
-/* チェックボックス・ヘッダーがある水平行について、スマホ幅でも強制的に横並び(row)を維持する */
+/* 1行の中のパーツが絶対に縦に崩れないように強制横並び */
 div[data-testid="stHorizontalBlock"]:has(.stCheckbox),
 div[data-testid="stHorizontalBlock"]:has(.matrix-header) {
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
     align-items: center !important;
-    padding-top: 4px !important;
-    padding-bottom: 4px !important;
+    gap: 0px !important;
 }
 
-/* 横並びを強制した際、各列(column)がスマホ幅で縦に潰れるのを防ぐ */
-div[data-testid="stHorizontalBlock"]:has(.stCheckbox) div[data-testid="column"],
-div[data-testid="stHorizontalBlock"]:has(.matrix-header) div[data-testid="column"] {
-    min-width: 0 !important;
+/* 1列目（号艇バッジ）を限界まで細く、2~4列目（チェックボックス）を均等に */
+div[data-testid="stHorizontalBlock"]:has(.stCheckbox) div[data-testid="column"]:nth-child(1),
+div[data-testid="stHorizontalBlock"]:has(.matrix-header) div[data-testid="column"]:nth-child(1) {
+    flex: 0 0 55px !important; /* 幅を55pxに完全固定 */
+    min-width: 55px !important;
+}
+div[data-testid="stHorizontalBlock"]:has(.stCheckbox) div[data-testid="column"]:not(:nth-child(1)),
+div[data-testid="stHorizontalBlock"]:has(.matrix-header) div[data-testid="column"]:not(:nth-child(1)) {
     flex: 1 1 0% !important;
+    min-width: 0 !important;
 }
 
-/* チェックボックスの不要な文字スペースを消し、完全に枠だけを各列の中央に配置 */
+/* チェックボックスの余白を極限まで削って中央に直列させる */
 .stCheckbox > label {
     padding-left: 0 !important;
     margin: 0 auto !important;
@@ -77,23 +81,23 @@ div[data-testid="stHorizontalBlock"]:has(.matrix-header) div[data-testid="column
     height: 32px !important;
 }
 
-/* 表ヘッダー文字の中央寄せ */
+/* 表ヘッダー文字 */
 .matrix-header {
     text-align: center;
     font-weight: bold;
-    font-size: 14px;
+    font-size: 13px;
 }
 
-/* テレボート風・号艇カラーバッジの高さと文字位置をスマホ用に完全固定 */
+/* 号艇バッジのサイズをスマホ幅に完全アジャスト */
 .boat-badge {
     display: block;
     text-align: center;
     font-weight: bold;
-    font-size: 15px;
-    height: 32px;
-    line-height: 32px;
+    font-size: 14px;
+    height: 30px;
+    line-height: 30px;
     border-radius: 4px;
-    width: 85%;
+    width: 45px; /* バッジ自体の横幅を45pxに */
     margin: 0 auto;
 }
 </style>
@@ -107,7 +111,7 @@ boat_styles = {
     4: "background-color: #0055b8; color: #ffffff;",                          
     5: "background-color: #fbd100; color: #000000;",                          
     6: "background-color: #00a040; color: #ffffff;",                          
-    "全": "background-color: #555555; color: #ffffff; font-size: 14px;"
+    "全": "background-color: #555555; color: #ffffff;"
 }
 
 # --- 🔄 セッション状態の初期化と双方向連動ロジック ---
@@ -204,47 +208,46 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
             similar_100 = df.sort_values('距離').head(100)
 
             # ----------------------------------------------------
-            # 📈 改善版：配当分布グラフ（触っても動かない、縦軸100固定）
+            # 📈 改善版：配当分布グラフ（文字化け完全回避の英数字ラベル）
             # ----------------------------------------------------
-            st.markdown("<h2>📈 類似100レースの配当分布（荒れやすさ）</h2>", unsafe_allow_html=True)
+            st.markdown("### 📈 類似100レースの配当分布（金額帯）")
             similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
             bins = [0, 1500, 3000, 5000, 10000, 30000, 1000000]
-            labels = ['本命\n(~1.5千)', '中穴\n(1.5~3千)', '中穴\n(3~5千)', '大穴\n(5千~1万)', '万舟\n(1万~3万)', '超万舟\n(3万~)']
+            
+            # 💡 日本語を排除し、k（千円）表記で分かりやすく統一（文字化けを100%回避）
+            labels = ['~1.5k', '1.5k~3k', '3k~5k', '5k~10k', '10k~30k', '30k~']
             similar_100['配当帯'] = pd.cut(similar_100['p'], bins=bins, labels=labels, right=False)
             
             dist = similar_100['配当帯'].value_counts().reindex(labels).fillna(0)
             
-            # スマホの画面幅に合わせた固定グラフの生成（背景透過）
-            fig, ax = plt.subplots(figsize=(6, 3.5), facecolor='none')
+            fig, ax = plt.subplots(figsize=(6, 3.2), facecolor='none')
             ax.set_facecolor('none')
             
-            # グラフの棒（ダークモードに馴染む青）
             ax.bar(dist.index, dist.values, color='#1f77b4', alpha=0.8, edgecolor='#114466')
             
-            # 💡 軸の設定（最大値100レース基準で完全固定）
+            # 軸の設定（100レース固定）
             ax.set_ylim(0, 100)
-            ax.set_ylabel("レース数 (回)", color='#888888', fontsize=9)
-            ax.tick_params(colors='#888888', labelsize=8)
+            ax.tick_params(colors='#888888', labelsize=9)
             
-            # 枠線を薄く目立たなくする
             for spine in ax.spines.values():
                 spine.set_color('#444444')
                 
             st.pyplot(fig, clear_figure=True)
-            st.caption("※最大100レース中、何レースがその価格帯に収まったかを示しています。")
+            st.caption("※縦軸はレース数（最大100回）。右に山があるほど荒れやすいパターンです。")
             st.markdown("---")
 
             def make_result_str(row):
                 return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
             similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
 
+            # 🏆 頻出ベスト3（金額は非表示にして純粋なゲーム性をUP）
             st.markdown("## 🏆 頻出着順ベスト3")
             top3 = similar_100['3連単'].value_counts().head(3)
             
             for i, (result, count) in enumerate(top3.items()):
-                avg_payout = similar_100[similar_100['3連単'] == result]['p'].mean()
-                st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%** （平均配当: {int(avg_payout)}円）")
+                st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%**")
 
+            # --- 🎯 答え合わせ（確率のみをストレートに表示して盛り上げる） ---
             if pred_1 and pred_2 and pred_3:
                 st.markdown("---")
                 st.markdown("### 🎯 あなたのフォーメーション予想結果")
@@ -257,12 +260,10 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                     my_count = len(my_hits)
                     
                     if my_count > 0:
-                        my_avg_payout = my_hits['p'].mean()
                         st.info(f"あなたの予想（計**{len(valid_combos)}点**）の合算出現率: **{my_count}%**")
-                        st.info(f"的中した場合の平均配当: **{int(my_avg_payout)}円**")
                         
                         best_hit = my_hits['3連単'].value_counts().head(1)
-                        st.caption(f"※ちなみに、あなたの予想内で最も出やすかったのは 【 {best_hit.index[0]} 】 でした。")
+                        st.caption(f"※ちなみに、あなたの予想内で最も出現率が高かった出目は 【 {best_hit.index[0]} 】 でした。")
                     else:
                         st.warning(f"あなたの予想（計{len(valid_combos)}点）は、今回の類似100レースでは1度も発生していません。来れば大穴です！")
                 else:
