@@ -5,13 +5,13 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
+import itertools
 
 # --- 画面設定 ---
 st.set_page_config(page_title="競艇 類似レース予想", layout="centered")
 st.title("🚤 競艇 類似レース予想ツール")
 st.write("公式サイトから出走表を自動取得し、過去のパターンから最も似ている100レースの確率を出します。")
 
-# 競艇場のリストと辞書
 venues = [
     "01_桐生", "02_戸田", "03_江戸川", "04_平和島", "05_多摩川", "06_浜名湖",
     "07_蒲郡", "08_常滑", "09_津", "10_三国", "11_びわこ", "12_住之江",
@@ -29,13 +29,27 @@ with col1:
 
 with col2:
     selected_venue = st.selectbox("📌 競艇場", venues)
-    jcd_str = selected_venue.split("_")[0] # 先頭の数字2桁だけを抽出
+    jcd_str = selected_venue.split("_")[0] 
 
 with col3:
     rno_str = st.selectbox("🚤 レース番号", [str(i) for i in range(1, 13)])
 
 st.markdown("---")
-my_pred = st.text_input("🎯 あなたの3連単予想（例: 1-2-3）", "1-2-3")
+
+# --- 💡 新機能：フォーメーション予想入力 ---
+st.markdown("### 🎯 あなたの予想（フォーメーション）")
+st.caption("※入力しなくても類似レースの検索は可能です")
+
+boat_options = [1, 2, 3, 4, 5, 6]
+col4, col5, col6 = st.columns(3)
+with col4:
+    pred_1 = st.multiselect("1着", boat_options, placeholder="選択...")
+with col5:
+    pred_2 = st.multiselect("2着", boat_options, placeholder="選択...")
+with col6:
+    pred_3 = st.multiselect("3着", boat_options, placeholder="選択...")
+
+st.markdown("---")
 
 # --- 2. データ取得関数 ---
 def fetch_boat_data(hd, jcd, rno):
@@ -44,12 +58,10 @@ def fetch_boat_data(hd, jcd, rno):
     soup = BeautifulSoup(res.content, "html.parser")
     syouritu_elements = soup.find_all(class_="is-lineH2")
     
-    # 出走表がまだ公開されていない場合などのエラーハンドリング
     if not syouritu_elements or len(syouritu_elements) < 27:
         return None, None
         
     rates = []
-    # ユーザーのColabコードのロジック（2, 7, 12, 17, 22, 27番目の要素）を0始まりのインデックスで指定
     target_indices = [1, 6, 11, 16, 21, 26] 
     for i in target_indices:
         txt = syouritu_elements[i].text.split('\n')[0]
@@ -58,7 +70,6 @@ def fetch_boat_data(hd, jcd, rno):
         except:
             rates.append(0.0)
             
-    # 相対勝率の計算
     mean_rate = sum(rates) / 6
     relative_rates = [round(r - mean_rate, 3) for r in rates]
     return rates, relative_rates
@@ -70,11 +81,10 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
         raw_rates, rel_rates = fetch_boat_data(hd_str, jcd_str, rno_str)
         
     if raw_rates is None:
-        st.error("指定されたレースの出走表データが取得できませんでした。日付やレース番号を確認してください（※レース前日夕方以降でないと公開されません）。")
+        st.error("指定されたレースの出走表データが取得できませんでした。")
     else:
         st.success("データ取得成功！")
         
-        # 取得したデータを画面に表示して確認できるようにする
         st.markdown("#### 📥 取得した勝率データ")
         cols = st.columns(6)
         for i in range(6):
@@ -92,7 +102,7 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
             df['距離'] = np.linalg.norm(past_patterns - user_pattern, axis=1)
             similar_100 = df.sort_values('距離').head(100)
 
-            # 📈 配当分布の可視化
+            # 📈 配当分布
             st.markdown("## 📈 類似100レースの配当分布（荒れやすさ）")
             similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
             bins = [0, 1500, 3000, 5000, 10000, 30000, 1000000]
@@ -101,15 +111,13 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
             
             dist = similar_100['配当帯'].value_counts(sort=False)
             st.bar_chart(dist)
-            st.caption("※グラフが右（大穴・万舟）に偏っているほど、このパターンは「荒れやすい（波乱含み）」と判断できます。")
             st.markdown("---")
 
-            # 🏆 ベスト3
             def make_result_str(row):
                 return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
-            
             similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
 
+            # 🏆 ベスト3
             st.markdown("## 🏆 頻出着順ベスト3")
             top3 = similar_100['3連単'].value_counts().head(3)
             
@@ -117,15 +125,33 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                 avg_payout = similar_100[similar_100['3連単'] == result]['p'].mean()
                 st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%** （平均配当: {int(avg_payout)}円）")
 
-            # 🎯 答え合わせ
-            st.markdown("### 🎯 あなたの予想の答え合わせ")
-            my_count = len(similar_100[similar_100['3連単'] == my_pred])
-            
-            if my_count > 0:
-                my_avg_payout = similar_100[similar_100['3連単'] == my_pred]['p'].mean()
-                st.info(f"あなたの予想 **【 {my_pred} 】** の出現率: **{my_count}%** （平均配当: {int(my_avg_payout)}円）")
-            else:
-                st.warning(f"あなたの予想 **【 {my_pred} 】** は、今回の類似100レースでは1度も発生していません。来れば大穴です！")
+            # --- 🎯 答え合わせ（予想が入力されている場合のみ実行） ---
+            if pred_1 and pred_2 and pred_3:
+                st.markdown("---")
+                st.markdown("### 🎯 あなたのフォーメーション予想結果")
+                
+                # 全組み合わせを生成（itertools.productを使用）
+                raw_combos = list(itertools.product(pred_1, pred_2, pred_3))
+                # 1-1-2などの不可能な組み合わせ（重複）を除外
+                valid_combos = [f"{c[0]}-{c[1]}-{c[2]}" for c in raw_combos if len(set(c)) == 3]
+                
+                if valid_combos:
+                    # 類似100レースの中で、作成した買い目に該当するものをすべて抽出
+                    my_hits = similar_100[similar_100['3連単'].isin(valid_combos)]
+                    my_count = len(my_hits)
+                    
+                    if my_count > 0:
+                        my_avg_payout = my_hits['p'].mean()
+                        st.info(f"あなたの予想（計**{len(valid_combos)}点**）の合算出現率: **{my_count}%**")
+                        st.info(f"的中した場合の平均配当: **{int(my_avg_payout)}円**")
+                        
+                        # おまけ：フォーメーション内で一番出現しやすかった出目を表示
+                        best_hit = my_hits['3連単'].value_counts().head(1)
+                        st.caption(f"※ちなみに、あなたの予想内で最も出やすかったのは 【 {best_hit.index[0]} 】 でした。")
+                    else:
+                        st.warning(f"あなたの予想（計{len(valid_combos)}点）は、今回の類似100レースでは1度も発生していません。来れば大穴です！")
+                else:
+                    st.error("有効な買い目がありません（同じ号艇が重複して選択されています）。")
 
         else:
             st.error(f"データファイルが見つかりません: {file_path}")
