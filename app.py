@@ -2,13 +2,16 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import os
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
 
 # --- 画面設定 ---
 st.set_page_config(page_title="競艇 類似レース予想", layout="centered")
 st.title("🚤 競艇 類似レース予想ツール")
-st.write("過去のパターンから、最も似ている100レースを抽出して確率を出します。")
+st.write("公式サイトから出走表を自動取得し、過去のパターンから最も似ている100レースの確率を出します。")
 
-# 競艇場のリスト
+# 競艇場のリストと辞書
 venues = [
     "01_桐生", "02_戸田", "03_江戸川", "04_平和島", "05_多摩川", "06_浜名湖",
     "07_蒲郡", "08_常滑", "09_津", "10_三国", "11_びわこ", "12_住之江",
@@ -16,82 +19,113 @@ venues = [
     "19_下関", "20_若松", "21_芦屋", "22_福岡", "23_唐津", "24_大村"
 ]
 
-# --- 1. 入力エリア ---
-selected_venue = st.selectbox("📌 競艇場を選択してください", venues)
-
-st.markdown("### 📊 各号艇の「相対勝率」を入力")
-st.caption("※相対勝率 ＝ その選手の勝率 － 6選手の平均勝率 (例: 1.5, -0.8 など)")
-
+# --- 1. レース情報の入力エリア ---
+st.markdown("### 1. レース情報の指定")
 col1, col2, col3 = st.columns(3)
-with col1: r1 = st.number_input("1号艇", value=0.0, step=0.1)
-with col2: r2 = st.number_input("2号艇", value=0.0, step=0.1)
-with col3: r3 = st.number_input("3号艇", value=0.0, step=0.1)
 
-col4, col5, col6 = st.columns(3)
-with col4: r4 = st.number_input("4号艇", value=0.0, step=0.1)
-with col5: r5 = st.number_input("5号艇", value=0.0, step=0.1)
-with col6: r6 = st.number_input("6号艇", value=0.0, step=0.1)
+with col1:
+    target_date = st.date_input("📅 日付")
+    hd_str = target_date.strftime("%Y%m%d")
+
+with col2:
+    selected_venue = st.selectbox("📌 競艇場", venues)
+    jcd_str = selected_venue.split("_")[0] # 先頭の数字2桁だけを抽出
+
+with col3:
+    rno_str = st.selectbox("🚤 レース番号", [str(i) for i in range(1, 13)])
 
 st.markdown("---")
 my_pred = st.text_input("🎯 あなたの3連単予想（例: 1-2-3）", "1-2-3")
 
-# --- 2. 検索・計算処理 ---
-if st.button("類似100レースを検索 🔍", use_container_width=True):
-    file_path = f"{selected_venue}.csv"
-
-    if os.path.exists(file_path):
-        df = pd.read_csv(file_path, encoding='utf-8-sig')
-
-        # ユーザー入力パターンと過去データのパターン比較
-        user_pattern = np.array([r1, r2, r3, r4, r5, r6])
-        past_patterns = df[['相対勝率_1', '相対勝率_2', '相対勝率_3', '相対勝率_4', '相対勝率_5', '相対勝率_6']].values
-
-        # 距離計算と抽出
-        df['距離'] = np.linalg.norm(past_patterns - user_pattern, axis=1)
-        similar_100 = df.sort_values('距離').head(100)
-
-        # ----------------------------------------------------
-        # 📈 新機能：配当分布の可視化（荒れやすさチェック）
-        # ----------------------------------------------------
-        st.markdown("## 📈 類似100レースの配当分布（荒れやすさ）")
+# --- 2. データ取得関数 ---
+def fetch_boat_data(hd, jcd, rno):
+    url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd}&hd={hd}"
+    res = requests.get(url)
+    soup = BeautifulSoup(res.content, "html.parser")
+    syouritu_elements = soup.find_all(class_="is-lineH2")
+    
+    # 出走表がまだ公開されていない場合などのエラーハンドリング
+    if not syouritu_elements or len(syouritu_elements) < 27:
+        return None, None
         
-        # p列（配当）を数値化
-        similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
+    rates = []
+    # ユーザーのColabコードのロジック（2, 7, 12, 17, 22, 27番目の要素）を0始まりのインデックスで指定
+    target_indices = [1, 6, 11, 16, 21, 26] 
+    for i in target_indices:
+        txt = syouritu_elements[i].text.split('\n')[0]
+        try:
+            rates.append(float(txt))
+        except:
+            rates.append(0.0)
+            
+    # 相対勝率の計算
+    mean_rate = sum(rates) / 6
+    relative_rates = [round(r - mean_rate, 3) for r in rates]
+    return rates, relative_rates
+
+# --- 3. 実行処理 ---
+if st.button("出走表を取得して類似100レースを検索 🔍", use_container_width=True):
+    
+    with st.spinner("公式サイトからデータを取得中..."):
+        raw_rates, rel_rates = fetch_boat_data(hd_str, jcd_str, rno_str)
         
-        # 配当を価格帯ごとに分類
-        bins = [0, 1500, 3000, 5000, 10000, 30000, 1000000]
-        labels = ['本命(~1.5千円)', '中穴(1.5~3千円)', '中穴(3~5千円)', '大穴(5千~1万円)', '万舟(1万~3万円)', '超万舟(3万円~)']
-        similar_100['配当帯'] = pd.cut(similar_100['p'], bins=bins, labels=labels, right=False)
+    if raw_rates is None:
+        st.error("指定されたレースの出走表データが取得できませんでした。日付やレース番号を確認してください（※レース前日夕方以降でないと公開されません）。")
+    else:
+        st.success("データ取得成功！")
         
-        # グラフ描画
-        dist = similar_100['配当帯'].value_counts(sort=False)
-        st.bar_chart(dist)
-        st.caption("※グラフが右（大穴・万舟）に偏っているほど、このパターンは「荒れやすい（波乱含み）」と判断できます。")
+        # 取得したデータを画面に表示して確認できるようにする
+        st.markdown("#### 📥 取得した勝率データ")
+        cols = st.columns(6)
+        for i in range(6):
+            cols[i].metric(label=f"{i+1}号艇", value=f"{raw_rates[i]}", delta=f"{rel_rates[i]} (相対)")
         st.markdown("---")
 
-        # ----------------------------------------------------
-        # 🏆 ベスト3と自分の予想の答え合わせ
-        # ----------------------------------------------------
-        def make_result_str(row):
-            return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
-        
-        similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
+        # --- 類似レース検索処理 ---
+        file_path = f"{selected_venue}.csv"
+        if os.path.exists(file_path):
+            df = pd.read_csv(file_path, encoding='utf-8-sig')
 
-        st.markdown("## 🏆 頻出着順ベスト3")
-        top3 = similar_100['3連単'].value_counts().head(3)
-        
-        for i, (result, count) in enumerate(top3.items()):
-            avg_payout = similar_100[similar_100['3連単'] == result]['p'].mean()
-            st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%** （平均配当: {int(avg_payout)}円）")
+            user_pattern = np.array(rel_rates)
+            past_patterns = df[['相対勝率_1', '相対勝率_2', '相対勝率_3', '相対勝率_4', '相対勝率_5', '相対勝率_6']].values
 
-        st.markdown("### 🎯 あなたの予想の答え合わせ")
-        my_count = len(similar_100[similar_100['3連単'] == my_pred])
-        
-        if my_count > 0:
-            my_avg_payout = similar_100[similar_100['3連単'] == my_pred]['p'].mean()
-            st.info(f"あなたの予想 **【 {my_pred} 】** の出現率: **{my_count}%** （平均配当: {int(my_avg_payout)}円）")
+            df['距離'] = np.linalg.norm(past_patterns - user_pattern, axis=1)
+            similar_100 = df.sort_values('距離').head(100)
+
+            # 📈 配当分布の可視化
+            st.markdown("## 📈 類似100レースの配当分布（荒れやすさ）")
+            similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
+            bins = [0, 1500, 3000, 5000, 10000, 30000, 1000000]
+            labels = ['本命(~1.5千円)', '中穴(1.5~3千円)', '中穴(3~5千円)', '大穴(5千~1万円)', '万舟(1万~3万円)', '超万舟(3万円~)']
+            similar_100['配当帯'] = pd.cut(similar_100['p'], bins=bins, labels=labels, right=False)
+            
+            dist = similar_100['配当帯'].value_counts(sort=False)
+            st.bar_chart(dist)
+            st.caption("※グラフが右（大穴・万舟）に偏っているほど、このパターンは「荒れやすい（波乱含み）」と判断できます。")
+            st.markdown("---")
+
+            # 🏆 ベスト3
+            def make_result_str(row):
+                return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
+            
+            similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
+
+            st.markdown("## 🏆 頻出着順ベスト3")
+            top3 = similar_100['3連単'].value_counts().head(3)
+            
+            for i, (result, count) in enumerate(top3.items()):
+                avg_payout = similar_100[similar_100['3連単'] == result]['p'].mean()
+                st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%** （平均配当: {int(avg_payout)}円）")
+
+            # 🎯 答え合わせ
+            st.markdown("### 🎯 あなたの予想の答え合わせ")
+            my_count = len(similar_100[similar_100['3連単'] == my_pred])
+            
+            if my_count > 0:
+                my_avg_payout = similar_100[similar_100['3連単'] == my_pred]['p'].mean()
+                st.info(f"あなたの予想 **【 {my_pred} 】** の出現率: **{my_count}%** （平均配当: {int(my_avg_payout)}円）")
+            else:
+                st.warning(f"あなたの予想 **【 {my_pred} 】** は、今回の類似100レースでは1度も発生していません。来れば大穴です！")
+
         else:
-            st.warning(f"あなたの予想 **【 {my_pred} 】** は、今回の類似100レースでは1度も発生していません。来れば大穴です！")
-
-    else:
-        st.error(f"データファイルが見つかりません: {file_path}")
+            st.error(f"データファイルが見つかりません: {file_path}")
