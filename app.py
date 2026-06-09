@@ -36,28 +36,76 @@ with col3:
 
 st.markdown("---")
 
-# --- 💡 新機能：マトリックス形式（縦：号艇、横：着順）フォーメーション入力 ---
+# --- 💡 新機能：マトリックス形式（補助線 ＆ テレボートカラー） ---
 st.markdown("### 🎯 あなたの予想（フォーメーション）")
 st.caption("※入力しなくても類似レースの検索は可能です")
+
+# 🛠️ 画面を完全なテーブル（表）に変えるためのカスタムCSS
+st.markdown("""
+<style>
+/* 行ごとの上下余白を狭くし、補助線（下線）を引く */
+div[data-testid="stHorizontalBlock"] {
+    border-bottom: 1px solid #dddddd;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    align-items: center;
+}
+/* ヘッダー行のスタイル */
+.matrix-header {
+    text-align: center;
+    font-weight: bold;
+    font-size: 15px;
+    color: #333333;
+}
+/* テレボート風・号艇バッジの共通スタイル */
+.boat-badge {
+    display: block;
+    text-align: center;
+    font-weight: bold;
+    font-size: 16px;
+    padding: 4px 0;
+    border-radius: 4px;
+    width: 80%;
+    margin: 0 auto;
+}
+/* チェックボックスの位置を中央に寄せる */
+.stCheckbox {
+    display: flex;
+    justify-content: center;
+}
+</style>
+""", unsafe_allow_html=True)
 
 pred_1 = []
 pred_2 = []
 pred_3 = []
 
 # ヘッダー行（横軸：着順）
-# 比率を [1.2, 1, 1, 1] にすることで全体の縦ラインを完璧に揃えます
-head_cols = st.columns([1.2, 1, 1, 1])
-head_cols[0].markdown("<b>号艇</b>", unsafe_allow_html=True)
-head_cols[1].markdown("<b>1着</b>", unsafe_allow_html=True)
-head_cols[2].markdown("<b>2着</b>", unsafe_allow_html=True)
-head_cols[3].markdown("<b>3着</b>", unsafe_allow_html=True)
+head_cols = st.columns([1.5, 1, 1, 1])
+head_cols[0].markdown("<div class='matrix-header'>号艇</div>", unsafe_allow_html=True)
+head_cols[1].markdown("<div class='matrix-header'>1着</div>", unsafe_allow_html=True)
+head_cols[2].markdown("<div class='matrix-header'>2着</div>", unsafe_allow_html=True)
+head_cols[3].markdown("<div class='matrix-header'>3着</div>", unsafe_allow_html=True)
+
+# テレボート公式のカラー配色の定義
+boat_styles = {
+    1: "background-color: #ffffff; color: #000000; border: 1px solid #aaaaaa;", # 1号艇: 白（埋もれないよう薄い枠線）
+    2: "background-color: #000000; color: #ffffff;",                          # 2号艇: 黒（白抜き）
+    3: "background-color: #e02020; color: #ffffff;",                          # 3号艇: 赤
+    4: "background-color: #0055b8; color: #ffffff;",                          # 4号艇: 青
+    5: "background-color: #fbd100; color: #000000;",                          # 5号艇: 黄
+    6: "background-color: #00a040; color: #ffffff;"                           # 6号艇: 緑
+}
 
 # 縦軸：1〜6号艇のループ
 for i in range(1, 7):
-    row_cols = st.columns([1.2, 1, 1, 1])
-    row_cols[0].markdown(f"<b>{i}号艇</b>", unsafe_allow_html=True)
+    row_cols = st.columns([1.5, 1, 1, 1])
     
-    # 各着順のチェックボックス（すべて左寄せで綺麗に直列します）
+    # 公式カラーを適用した数字バッジを出力
+    style = boat_styles[i]
+    row_cols[0].markdown(f"<div class='boat-badge' style='{style}'>{i}</div>", unsafe_allow_html=True)
+    
+    # 各着順のチェックボックス
     if row_cols[1].checkbox("", key=f"1着_{i}"):
         pred_1.append(i)
     if row_cols[2].checkbox("", key=f"2着_{i}"):
@@ -65,7 +113,8 @@ for i in range(1, 7):
     if row_cols[3].checkbox("", key=f"3着_{i}"):
         pred_3.append(i)
 
-st.markdown("---")
+# 表の下に少し余白を追加
+st.markdown("<br>", unsafe_allow_html=True)
 
 # --- 2. データ取得関数 ---
 def fetch_boat_data(hd, jcd, rno):
@@ -147,7 +196,6 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                 st.markdown("### 🎯 あなたのフォーメーション予想結果")
                 
                 raw_combos = list(itertools.product(pred_1, pred_2, pred_3))
-                # 1-1-2などの重複を除外
                 valid_combos = [f"{c[0]}-{c[1]}-{c[2]}" for c in raw_combos if len(set(c)) == 3]
                 
                 if valid_combos:
