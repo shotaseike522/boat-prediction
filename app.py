@@ -41,54 +41,65 @@ st.markdown("---")
 st.markdown("### 🎯 あなたの予想（フォーメーション）")
 st.caption("※入力しなくても類似レースの検索は可能です")
 
-# 🛠️ スマホの横幅（スクロールなし）に200%特化させたCSS
+# 🛠️ スマホでも絶対に1画面（横スクロールなし）に収めるための強力なCSS
 st.markdown("""
 <style>
-/* 1行の中のパーツが絶対に縦に崩れないように強制横並び */
-div[data-testid="stHorizontalBlock"]:has(.stCheckbox),
+/* 1行の親コンテナを「強制横並び・折り返し禁止」に設定し、幅を100%に完全固定 */
+div[data-testid="stHorizontalBlock"]:has(.boat-badge),
 div[data-testid="stHorizontalBlock"]:has(.matrix-header) {
     display: flex !important;
     flex-direction: row !important;
     flex-wrap: nowrap !important;
-    align-items: center !important;
-    gap: 0px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
 }
 
-/* 1列目（号艇バッジ）を限界まで細く、2~4列目（チェックボックス）を均等に */
-div[data-testid="stHorizontalBlock"]:has(.stCheckbox) div[data-testid="column"]:nth-child(1),
-div[data-testid="stHorizontalBlock"]:has(.matrix-header) div[data-testid="column"]:nth-child(1) {
-    flex: 0 0 55px !important; /* 幅を55pxに完全固定 */
-    min-width: 55px !important;
-}
-div[data-testid="stHorizontalBlock"]:has(.stCheckbox) div[data-testid="column"]:not(:nth-child(1)),
-div[data-testid="stHorizontalBlock"]:has(.matrix-header) div[data-testid="column"]:not(:nth-child(1)) {
-    flex: 1 1 0% !important;
+/* 1列目（号艇バッジ）の幅を約28%に強制固定 */
+div[data-testid="stHorizontalBlock"]:has(.boat-badge) > div[data-testid="column"]:nth-child(1),
+div[data-testid="stHorizontalBlock"]:has(.matrix-header) > div[data-testid="column"]:nth-child(1) {
+    width: 28% !important;
+    flex: 0 0 28% !important;
     min-width: 0 !important;
+    padding: 0 2px !important;
 }
 
-/* チェックボックスの余白を極限まで削って中央に直列させる */
-.stCheckbox > label {
-    padding-left: 0 !important;
-    margin: 0 auto !important;
+/* 2〜4列目（着順チェックボックス）の幅を残りの約24%ずつに強制固定 */
+div[data-testid="stHorizontalBlock"]:has(.boat-badge) > div[data-testid="column"]:nth-child(n+2),
+div[data-testid="stHorizontalBlock"]:has(.matrix-header) > div[data-testid="column"]:nth-child(n+2) {
+    width: 24% !important;
+    flex: 0 0 24% !important;
+    min-width: 0 !important;
+    padding: 0 2px !important;
 }
-.stCheckbox div[data-testid="stMarkdownContainer"] {
-    display: none !important;
-}
+
+/* チェックボックスの無駄な余白を消滅させて中央に配置 */
 .stCheckbox {
     display: flex !important;
     justify-content: center !important;
     align-items: center !important;
-    height: 32px !important;
+    min-height: 30px !important;
+}
+.stCheckbox > label {
+    padding: 0 !important;
+    margin: 0 !important;
+    min-height: 0 !important;
+}
+/* ラベルテキスト（非表示） */
+.stCheckbox div[data-testid="stMarkdownContainer"] {
+    display: none !important;
 }
 
-/* 表ヘッダー文字 */
+/* 表ヘッダー文字（改行させない） */
 .matrix-header {
     text-align: center;
     font-weight: bold;
     font-size: 13px;
+    white-space: nowrap;
 }
 
-/* 号艇バッジのサイズをスマホ幅に完全アジャスト */
+/* 号艇バッジのサイズと文字位置 */
 .boat-badge {
     display: block;
     text-align: center;
@@ -97,7 +108,8 @@ div[data-testid="stHorizontalBlock"]:has(.matrix-header) div[data-testid="column
     height: 30px;
     line-height: 30px;
     border-radius: 4px;
-    width: 45px; /* バッジ自体の横幅を45pxに */
+    width: 100%; 
+    max-width: 60px; /* 広がりすぎ防止 */
     margin: 0 auto;
 }
 </style>
@@ -208,13 +220,11 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
             similar_100 = df.sort_values('距離').head(100)
 
             # ----------------------------------------------------
-            # 📈 改善版：配当分布グラフ（文字化け完全回避の英数字ラベル）
+            # 📈 配当分布グラフ（金額帯）
             # ----------------------------------------------------
             st.markdown("### 📈 類似100レースの配当分布（金額帯）")
             similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
             bins = [0, 1500, 3000, 5000, 10000, 30000, 1000000]
-            
-            # 💡 日本語を排除し、k（千円）表記で分かりやすく統一（文字化けを100%回避）
             labels = ['~1.5k', '1.5k~3k', '3k~5k', '5k~10k', '10k~30k', '30k~']
             similar_100['配当帯'] = pd.cut(similar_100['p'], bins=bins, labels=labels, right=False)
             
@@ -222,13 +232,9 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
             
             fig, ax = plt.subplots(figsize=(6, 3.2), facecolor='none')
             ax.set_facecolor('none')
-            
             ax.bar(dist.index, dist.values, color='#1f77b4', alpha=0.8, edgecolor='#114466')
-            
-            # 軸の設定（100レース固定）
             ax.set_ylim(0, 100)
             ax.tick_params(colors='#888888', labelsize=9)
-            
             for spine in ax.spines.values():
                 spine.set_color('#444444')
                 
@@ -240,14 +246,18 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                 return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
             similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
 
-            # 🏆 頻出ベスト3（金額は非表示にして純粋なゲーム性をUP）
-            st.markdown("## 🏆 頻出着順ベスト3")
-            top3 = similar_100['3連単'].value_counts().head(3)
+            # ----------------------------------------------------
+            # 🏆 頻出ベスト5（全体）
+            # ----------------------------------------------------
+            st.markdown("## 🏆 全体の頻出着順ベスト5")
+            top5 = similar_100['3連単'].value_counts().head(5)
             
-            for i, (result, count) in enumerate(top3.items()):
+            for i, (result, count) in enumerate(top5.items()):
                 st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%**")
 
-            # --- 🎯 答え合わせ（確率のみをストレートに表示して盛り上げる） ---
+            # ----------------------------------------------------
+            # 🎯 答え合わせ（予想内のベスト5を表示）
+            # ----------------------------------------------------
             if pred_1 and pred_2 and pred_3:
                 st.markdown("---")
                 st.markdown("### 🎯 あなたのフォーメーション予想結果")
@@ -262,8 +272,13 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                     if my_count > 0:
                         st.info(f"あなたの予想（計**{len(valid_combos)}点**）の合算出現率: **{my_count}%**")
                         
-                        best_hit = my_hits['3連単'].value_counts().head(1)
-                        st.caption(f"※ちなみに、あなたの予想内で最も出現率が高かった出目は 【 {best_hit.index[0]} 】 でした。")
+                        st.markdown("#### 🌟 予想内の頻出着順ベスト5")
+                        my_best = my_hits['3連単'].value_counts().head(5)
+                        
+                        # リスト形式でスッキリと表示
+                        for i, (result, count) in enumerate(my_best.items()):
+                            st.markdown(f"**第{i+1}位：【 {result} 】** （出現率: {count}%）")
+                            
                     else:
                         st.warning(f"あなたの予想（計{len(valid_combos)}点）は、今回の類似100レースでは1度も発生していません。来れば大穴です！")
                 else:
