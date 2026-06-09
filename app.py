@@ -6,6 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 import itertools
+import matplotlib.pyplot as plt
 
 # --- 画面設定 ---
 st.set_page_config(page_title="競艇 類似レース予想", layout="centered")
@@ -40,41 +41,60 @@ st.markdown("---")
 st.markdown("### 🎯 あなたの予想（フォーメーション）")
 st.caption("※入力しなくても類似レースの検索は可能です")
 
-# 🛠️ ズレを完全に防ぎ、デザインを整えるカスタムCSS
+# 🛠️ スマホ画面でも絶対に縦崩れさせないための最強CSSインジェクション
 st.markdown("""
 <style>
-/* チェックボックスの無駄な余白を削り、ラベルテキストを消す */
+/* チェックボックス・ヘッダーがある水平行について、スマホ幅でも強制的に横並び(row)を維持する */
+div[data-testid="stHorizontalBlock"]:has(.stCheckbox),
+div[data-testid="stHorizontalBlock"]:has(.matrix-header) {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+}
+
+/* 横並びを強制した際、各列(column)がスマホ幅で縦に潰れるのを防ぐ */
+div[data-testid="stHorizontalBlock"]:has(.stCheckbox) div[data-testid="column"],
+div[data-testid="stHorizontalBlock"]:has(.matrix-header) div[data-testid="column"] {
+    min-width: 0 !important;
+    flex: 1 1 0% !important;
+}
+
+/* チェックボックスの不要な文字スペースを消し、完全に枠だけを各列の中央に配置 */
 .stCheckbox > label {
     padding-left: 0 !important;
+    margin: 0 auto !important;
 }
-.stCheckbox > div[data-testid="stMarkdownContainer"] {
+.stCheckbox div[data-testid="stMarkdownContainer"] {
     display: none !important;
 }
-/* ヘッダー行のスタイル */
+.stCheckbox {
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    height: 32px !important;
+}
+
+/* 表ヘッダー文字の中央寄せ */
 .matrix-header {
     text-align: center;
     font-weight: bold;
-    font-size: 15px;
-    color: #333333;
+    font-size: 14px;
 }
-/* テレボート風・号艇バッジのスタイル */
+
+/* テレボート風・号艇カラーバッジの高さと文字位置をスマホ用に完全固定 */
 .boat-badge {
     display: block;
     text-align: center;
     font-weight: bold;
-    font-size: 16px;
-    height: 30px;
-    line-height: 30px;
+    font-size: 15px;
+    height: 32px;
+    line-height: 32px;
     border-radius: 4px;
-    width: 90%;
+    width: 85%;
     margin: 0 auto;
-}
-/* チェックボックスを各列の完全な中央に配置する */
-.stCheckbox {
-    display: flex;
-    justify-content: center;
-    height: 30px;
-    align-items: center;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -87,7 +107,7 @@ boat_styles = {
     4: "background-color: #0055b8; color: #ffffff;",                          
     5: "background-color: #fbd100; color: #000000;",                          
     6: "background-color: #00a040; color: #ffffff;",                          
-    "全": "background-color: #777777; color: #ffffff; font-size: 14px;"
+    "全": "background-color: #555555; color: #ffffff; font-size: 14px;"
 }
 
 # --- 🔄 セッション状態の初期化と双方向連動ロジック ---
@@ -98,48 +118,40 @@ for p in [1, 2, 3]:
     if f"all_{p}" not in st.session_state:
         st.session_state[f"all_{p}"] = False
 
-# 「全」が押された時の処理
 def click_all(p):
     new_val = st.session_state[f"all_{p}"]
     for i in range(1, 7):
         st.session_state[f"boat_{p}_{i}"] = new_val
 
-# 各号艇が押された時の処理
 def click_boat(p):
     st.session_state[f"all_{p}"] = all(st.session_state[f"boat_{p}_{i}"] for i in range(1, 7))
 
 # --- マトリックス表のレンダリング ---
-# ヘッダー（着順）
 head_cols = st.columns([1.2, 1, 1, 1])
 head_cols[0].markdown("<div class='matrix-header'>号艇</div>", unsafe_allow_html=True)
 head_cols[1].markdown("<div class='matrix-header'>1着</div>", unsafe_allow_html=True)
 head_cols[2].markdown("<div class='matrix-header'>2着</div>", unsafe_allow_html=True)
 head_cols[3].markdown("<div class='matrix-header'>3着</div>", unsafe_allow_html=True)
-st.markdown("<hr style='margin: 4px 0; border: 0; border-top: 1px solid #bbbbbb;'>", unsafe_allow_html=True)
+st.markdown("<hr style='margin: 2px 0; border: 0; border-top: 1px solid #555555;'>", unsafe_allow_html=True)
 
-# 1〜6号艇の行ループ
 for i in range(1, 7):
     row_cols = st.columns([1.2, 1, 1, 1])
     row_cols[0].markdown(f"<div class='boat-badge' style='{boat_styles[i]}'>{i}</div>", unsafe_allow_html=True)
-    
     row_cols[1].checkbox("", key=f"boat_1_{i}", on_change=click_boat, args=(1,))
     row_cols[2].checkbox("", key=f"boat_2_{i}", on_change=click_boat, args=(2,))
     row_cols[3].checkbox("", key=f"boat_3_{i}", on_change=click_boat, args=(3,))
-    st.markdown("<hr style='margin: 4px 0; border: 0; border-top: 1px solid #eeeeee;'>", unsafe_allow_html=True)
+    st.markdown("<hr style='margin: 2px 0; border: 0; border-top: 1px solid #333333;'>", unsafe_allow_html=True)
 
-# 「全」選択の行
 row_all_cols = st.columns([1.2, 1, 1, 1])
 row_all_cols[0].markdown(f"<div class='boat-badge' style='{boat_styles['全']}'>全</div>", unsafe_allow_html=True)
 row_all_cols[1].checkbox("", key="all_1", on_change=click_all, args=(1,))
 row_all_cols[2].checkbox("", key="all_2", on_change=click_all, args=(2,))
 row_all_cols[3].checkbox("", key="all_3", on_change=click_all, args=(3,))
-st.markdown("<hr style='margin: 4px 0; border: 0; border-top: 1px solid #bbbbbb;'>", unsafe_allow_html=True)
+st.markdown("<hr style='margin: 2px 0; border: 0; border-top: 1px solid #555555;'>", unsafe_allow_html=True)
 
-# チェックが入っている号艇のリストを回収
 pred_1 = [i for i in range(1, 7) if st.session_state[f"boat_1_{i}"]]
 pred_2 = [i for i in range(1, 7) if st.session_state[f"boat_2_{i}"]]
 pred_3 = [i for i in range(1, 7) if st.session_state[f"boat_3_{i}"]]
-
 
 # --- 2. データ取得関数 ---
 def fetch_boat_data(hd, jcd, rno):
@@ -181,7 +193,6 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
             cols[i].metric(label=f"{i+1}号艇", value=f"{raw_rates[i]}", delta=f"{rel_rates[i]} (相対)")
         st.markdown("---")
 
-        # --- 類似レース検索処理 ---
         file_path = f"{selected_venue}.csv"
         if os.path.exists(file_path):
             df = pd.read_csv(file_path, encoding='utf-8-sig')
@@ -192,22 +203,41 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
             df['距離'] = np.linalg.norm(past_patterns - user_pattern, axis=1)
             similar_100 = df.sort_values('距離').head(100)
 
-            # 📈 配当分布
-            st.markdown("## 📈 類似100レースの配当分布（荒れやすさ）")
+            # ----------------------------------------------------
+            # 📈 改善版：配当分布グラフ（触っても動かない、縦軸100固定）
+            # ----------------------------------------------------
+            st.markdown("<h2>📈 類似100レースの配当分布（荒れやすさ）</h2>", unsafe_allow_html=True)
             similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
             bins = [0, 1500, 3000, 5000, 10000, 30000, 1000000]
-            labels = ['本命(~1.5千円)', '中穴(1.5~3千円)', '中穴(3~5千円)', '大穴(5千~1万円)', '万舟(1万~3万円)', '超万舟(3万円~)']
+            labels = ['本命\n(~1.5千)', '中穴\n(1.5~3千)', '中穴\n(3~5千)', '大穴\n(5千~1万)', '万舟\n(1万~3万)', '超万舟\n(3万~)']
             similar_100['配当帯'] = pd.cut(similar_100['p'], bins=bins, labels=labels, right=False)
             
-            dist = similar_100['配当帯'].value_counts(sort=False)
-            st.bar_chart(dist)
+            dist = similar_100['配当帯'].value_counts().reindex(labels).fillna(0)
+            
+            # スマホの画面幅に合わせた固定グラフの生成（背景透過）
+            fig, ax = plt.subplots(figsize=(6, 3.5), facecolor='none')
+            ax.set_facecolor('none')
+            
+            # グラフの棒（ダークモードに馴染む青）
+            ax.bar(dist.index, dist.values, color='#1f77b4', alpha=0.8, edgecolor='#114466')
+            
+            # 💡 軸の設定（最大値100レース基準で完全固定）
+            ax.set_ylim(0, 100)
+            ax.set_ylabel("レース数 (回)", color='#888888', fontsize=9)
+            ax.tick_params(colors='#888888', labelsize=8)
+            
+            # 枠線を薄く目立たなくする
+            for spine in ax.spines.values():
+                spine.set_color('#444444')
+                
+            st.pyplot(fig, clear_figure=True)
+            st.caption("※最大100レース中、何レースがその価格帯に収まったかを示しています。")
             st.markdown("---")
 
             def make_result_str(row):
                 return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
             similar_100['3連単'] = similar_100.apply(make_result_str, axis=1)
 
-            # 🏆 ベスト3
             st.markdown("## 🏆 頻出着順ベスト3")
             top3 = similar_100['3連単'].value_counts().head(3)
             
@@ -215,7 +245,6 @@ if st.button("出走表を取得して類似100レースを検索 🔍", use_con
                 avg_payout = similar_100[similar_100['3連単'] == result]['p'].mean()
                 st.success(f"**第{i+1}位: 【 {result} 】** 出現率: **{count}%** （平均配当: {int(avg_payout)}円）")
 
-            # --- 🎯 答え合わせ（マトリックス入力の判定） ---
             if pred_1 and pred_2 and pred_3:
                 st.markdown("---")
                 st.markdown("### 🎯 あなたのフォーメーション予想結果")
