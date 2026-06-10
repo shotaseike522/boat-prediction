@@ -35,8 +35,12 @@ if "target_rno" not in st.session_state:
     st.session_state["target_rno"] = "1"
 if "auto_search" not in st.session_state:
     st.session_state["auto_search"] = False
+if "toast_msg" not in st.session_state:
+    st.session_state["toast_msg"] = None
+
+# 💡 タブ選択状態をStreamlitのWidget Stateと完全に結びつけるための初期化
 if "current_tab" not in st.session_state:
-    st.session_state["current_tab"] = "🔍 自分で分析・予想" # 初期位置タブ
+    st.session_state["current_tab"] = "🔍 自分で分析・予想"
 
 # --- ⚡ 3. AI厳選用：超高速一括計算キャッシュロジック ---
 @st.cache_data(ttl=1800) 
@@ -89,19 +93,17 @@ def generate_ai_ranking_cached():
 
 
 # ====================================================
-# 📱 スマホ最適化カスタムタブ（プログラム制御可能）
+# 📱 スマホ最適化カスタムタブ（バグ完全修正版）
 # ====================================================
-# 横並びのボタン風ラジオボタンでタブを自作（スマホでも崩れません）
-selected_tab = st.radio(
+# key="current_tab" を指定することで、プログラム側からの書き換えと100%同期します
+st.radio(
     "ナビゲーション",
     ["🔍 自分で分析・予想", "🤖 本日のAI厳選"],
-    index=["🔍 自分で分析・予想", "🤖 本日のAI厳選"].index(st.session_state["current_tab"]),
+    key="current_tab",
     horizontal=True,
     label_visibility="collapsed"
 )
-st.session_state["current_tab"] = selected_tab
 
-# 上部タブとコンテンツの間に少しスペースを空ける
 st.markdown("<br>", unsafe_allow_html=True)
 
 
@@ -109,6 +111,12 @@ st.markdown("<br>", unsafe_allow_html=True)
 # 🔍 タブ1: 自分で分析・予想
 # ====================================================
 if st.session_state["current_tab"] == "🔍 自分で分析・予想":
+    
+    # 💡 UI/UX改善: ジャンプしてきた時に画面に通知をふわっと出す
+    if st.session_state["toast_msg"]:
+        st.toast(st.session_state["toast_msg"])
+        st.session_state["toast_msg"] = None # 表示したらクリア
+        
     st.markdown("### 1. レース情報の指定")
     col1, col2 = st.columns(2)
 
@@ -134,23 +142,33 @@ if st.session_state["current_tab"] == "🔍 自分で分析・予想":
     with c1:
         st.markdown("#### 🥇 1着")
         all_1 = st.toggle("【全】", key="m_all_1")
-        pred_1 = boat_options if all_1 else st.multiselect("1着", boat_options, placeholder="選択..", label_visibility="collapsed")
+        pred_1 = boat_options if all_1 else st.multiselect("1着", boat_options, placeholder="選択..", label_visibility="collapsed", key="sel_1")
 
     with c2:
         st.markdown("#### 🥈 2着")
         all_2 = st.toggle("【全】", key="m_all_2")
-        pred_2 = boat_options if all_2 else st.multiselect("2着", boat_options, placeholder="選択..", label_visibility="collapsed")
+        pred_2 = boat_options if all_2 else st.multiselect("2着", boat_options, placeholder="選択..", label_visibility="collapsed", key="sel_2")
 
     with c3:
         st.markdown("#### 🥉 3着")
         all_3 = st.toggle("【全】", key="m_all_3")
-        pred_3 = boat_options if all_3 else st.multiselect("3着", boat_options, placeholder="選択..", label_visibility="collapsed")
+        pred_3 = boat_options if all_3 else st.multiselect("3着", boat_options, placeholder="選択..", label_visibility="collapsed", key="key_3")
+
+    # 💡 UI/UX改善: フォーメーションを一発で白紙に戻すリセットボタン
+    if st.button("❌ 予想入力をすべてクリアする", use_container_width=True):
+        for k in ["sel_1", "sel_2", "key_3", "m_all_1", "m_all_2", "m_all_3"]:
+            if k in st.session_state:
+                if "all" in k:
+                    st.session_state[k] = False
+                else:
+                    st.session_state[k] = []
+        st.rerun()
 
     st.markdown("---")
 
     search_triggered = st.button("類似レースを検索して分析する 🔍", use_container_width=True)
     
-    # 💡 AI厳選からの強制ジャンプが発動した場合のトリガー
+    # AI厳選からの自動検索ジャンプ
     if st.session_state["auto_search"]:
         search_triggered = True
         st.session_state["auto_search"] = False 
@@ -233,7 +251,7 @@ if st.session_state["current_tab"] == "🔍 自分で分析・予想":
                 st.caption("※縦軸はレース数（最大100回）。右に山があるほど荒れやすいパターンです。")
                 st.markdown("---")
 
-                # 💡【ご指定位置】レースの性質（ステータス）をグラフの直下に配置
+                # 【指定位置】レースの性質（ステータス）をグラフの直下に配置
                 is_kikaku_slot = int(rno_str) in kikaku_master.get(jcd_str, {}).get("kikaku_slots", [])
                 is_under_8r = int(rno_str) <= 8
                 
@@ -259,7 +277,7 @@ if st.session_state["current_tab"] == "🔍 自分で分析・予想":
             st.error("当日出走表ファイル（real_time_出走表.csv）が配置されていません。")
 
 # ====================================================
-# 🤖 タブ2: 本日のAI厳選（開いた瞬間に自動表示）
+# 🤖 タブ2: 本日のAI厳選
 # ====================================================
 elif st.session_state["current_tab"] == "🤖 本日のAI厳選":
     st.markdown("### 🌟 AIがデータから見つけた本日の勝負レース（全場スキャン）")
@@ -274,12 +292,14 @@ elif st.session_state["current_tab"] == "🤖 本日のAI厳選":
         st.markdown("#### 🟢 鉄板！ド安定レース（全場総合トップ5）")
         df_stable = df_all_res.sort_values("honmei_rate", ascending=False).head(5)
         for _, row in df_stable.iterrows():
-            btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 本命率: {int(row['honmei_rate'])}% ➔"
+            venue_name_only = row['venue'].split('_')[1]
+            btn_label = f"【{venue_name_only} {int(row['rno'])}R】 本命率: {int(row['honmei_rate'])}% ➔"
             if st.button(btn_label, key=f"all_btn_st_{row['venue']}_{row['rno']}"):
                 st.session_state["target_venue"] = row['venue']
                 st.session_state["target_rno"] = str(int(row['rno']))
-                st.session_state["current_tab"] = "🔍 自分で分析・予想" # 👈 🔥【最重要】これでタブ1へ強制ワープ！
+                st.session_state["current_tab"] = "🔍 自分で分析・予想" # 👈 🔥強制ワープ
                 st.session_state["auto_search"] = True
+                st.session_state["toast_msg"] = f"🏃‍♂️ AI厳選から 【{venue_name_only} {int(row['rno'])}R】 をロードしました！"
                 st.rerun()
                 
         st.markdown("---")
@@ -288,12 +308,14 @@ elif st.session_state["current_tab"] == "🤖 本日のAI厳選":
         st.markdown("#### 🔴 波乱注意！大荒れレース（全場総合トップ5）")
         df_wild = df_all_res.sort_values("manshu_rate", ascending=False).head(5)
         for _, row in df_wild.iterrows():
-            btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 万舟率: {int(row['manshu_rate'])}% ➔"
+            venue_name_only = row['venue'].split('_')[1]
+            btn_label = f"【{venue_name_only} {int(row['rno'])}R】 万舟率: {int(row['manshu_rate'])}% ➔"
             if st.button(btn_label, key=f"all_btn_wd_{row['venue']}_{row['rno']}"):
                 st.session_state["target_venue"] = row['venue']
                 st.session_state["target_rno"] = str(int(row['rno']))
-                st.session_state["current_tab"] = "🔍 自分で分析・予想" # 👈 🔥【最重要】これでタブ1へ強制ワープ！
+                st.session_state["current_tab"] = "🔍 自分で分析・予想" # 👈 🔥強制ワープ
                 st.session_state["auto_search"] = True
+                st.session_state["toast_msg"] = f"🏃‍♂️ AI厳選から 【{venue_name_only} {int(row['rno'])}R】 をロードしました！"
                 st.rerun()
 
         st.markdown("---")
@@ -313,10 +335,12 @@ elif st.session_state["current_tab"] == "🤖 本日のAI厳選":
         else:
             df_kikaku = pd.DataFrame(kikaku_rows).sort_values("in_escape_rate", ascending=False).head(5)
             for _, row in df_kikaku.iterrows():
-                btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 イン逃げ率: {int(row['in_escape_rate'])}% ➔"
+                venue_name_only = row['venue'].split('_')[1]
+                btn_label = f"【{venue_name_only} {int(row['rno'])}R】 イン逃げ率: {int(row['in_escape_rate'])}% ➔"
                 if st.button(btn_label, key=f"all_btn_kk_{row['venue']}_{row['rno']}"):
                     st.session_state["target_venue"] = row['venue']
                     st.session_state["target_rno"] = str(int(row['rno']))
-                    st.session_state["current_tab"] = "🔍 自分で分析・予想" # 👈 🔥【最重要】これでタブ1へ強制ワープ！
+                    st.session_state["current_tab"] = "🔍 自分で分析・予想" # 👈 🔥強制ワープ
                     st.session_state["auto_search"] = True
+                    st.session_state["toast_msg"] = f"🏃‍♂️ AI厳選から 【{venue_name_only} {int(row['rno'])}R】 をロードしました！"
                     st.rerun()
