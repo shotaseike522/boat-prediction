@@ -21,7 +21,7 @@ venues_map = {
     "01": "01_桐生", "02": "02_戸田", "03": "03_江戸川", "04": "04_平和島", 
     "05": "05_多摩川", "06": "06_浜名湖", "07": "07_蒲郡", "08": "08_常滑", 
     "09": "09_津", "10": "10_三国", "11": "11_びわこ", "12": "12_住之江",
-    "13": "13_尼崎", "14": "14_鳴門", "15": "14_鳴門", "15": "15_丸亀", 
+    "13": "13_尼崎", "14": "14_鳴門", "15": "15_丸亀", 
     "16": "16_児島", "17": "17_宮島", "18": "18_徳山", "19": "19_下関", 
     "20": "20_若松", "21": "21_芦屋", "22": "22_福岡", "23": "23_唐津", 
     "24": "24_大村"
@@ -36,13 +36,64 @@ if "target_rno" not in st.session_state:
 if "auto_search" not in st.session_state:
     st.session_state["auto_search"] = False
 
+# --- ⚡ 3. AI厳選用：超高速一括計算キャッシュロジック ---
+@st.cache_data(ttl=1800) # 30分間計算結果を完全にキャッシュ（超サクサク動く）
+def generate_ai_ranking_cached():
+    if not os.path.exists("real_time_出走表.csv"):
+        return None
+        
+    df_today = pd.read_csv("real_time_出走表.csv")
+    all_race_results = []
+    
+    # 当日出走表から24場×12Rを一括スキャン
+    for _, row in df_today.iterrows():
+        jcd_int = int(row['jcd'])
+        jcd_str = f"{jcd_int:02d}"
+        venue_full_name = venues_map.get(jcd_str)
+        
+        if not venue_full_name:
+            continue
+            
+        csv_file = f"{venue_full_name}.csv"
+        if not os.path.exists(csv_file):
+            continue
+        
+        df_past = pd.read_csv(csv_file, encoding='utf-8-sig')
+        past_patterns = df_past[['相対勝率_1', '相対勝率_2', '相対勝率_3', '相対勝率_4', '相対勝率_5', '相対勝率_6']].values
+        
+        rel_rates = [
+            row['相対勝率_1'], row['相対勝率_2'], row['相対勝率_3'],
+            row['相対勝率_4'], row['相対勝率_5'], row['相対勝率_6']
+        ]
+        
+        distances = np.linalg.norm(past_patterns - np.array(rel_rates), axis=1)
+        df_past['tmp_dist'] = distances
+        similar_100 = df_past.sort_values('tmp_dist').head(100).copy()
+        similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
+        
+        honmei_count = (similar_100['p'] < 1500).sum()
+        manshu_count = (similar_100['p'] >= 10000).sum()
+        in_escape_count = (similar_100['r1'] == 1.0).sum()
+        
+        all_race_results.append({
+            "venue": venue_full_name,
+            "jcd": jcd_str,
+            "rno": int(row['r']),
+            "honmei_rate": honmei_count,
+            "manshu_rate": manshu_count,
+            "in_escape_rate": in_escape_count
+        })
+        
+    return pd.DataFrame(all_race_results) if all_race_results else None
+
+
 # ====================================================
-# 📱 画面レイアウト（ご指定通り：検索が1つ目、AI厳選が2つ目）
+# 📱 画面レイアウト（2タブ構成）
 # ====================================================
 tab_search, tab_ai = st.tabs(["🔍 自分で分析・予想", "🤖 本日のAI厳選"])
 
 # ====================================================
-# 🔍 タブ1: 自分で分析・予想
+# 🔍 タブ1: 自分で分析・予想（出力順を最適化）
 # ====================================================
 with tab_search:
     st.markdown("### 1. レース情報の指定")
@@ -91,14 +142,10 @@ with tab_search:
         st.session_state["auto_search"] = False 
 
     if search_triggered:
-        # 当日の出走表ファイルを読み込み
         if os.path.exists("real_time_出走表.csv"):
             df_today = pd.read_csv("real_time_出走表.csv")
-            
-            # 該当する場＆レースの出走表行を特定
             df_target = df_today[(df_today['jcd'] == int(jcd_str)) & (df_today['r'] == int(rno_str))]
             
-            # 万が一データがなかった場合のフォールバック（過去データから身代わりをランダム抽出）
             file_path = f"{selected_venue}.csv"
             if df_target.empty:
                 if os.path.exists(file_path):
@@ -148,29 +195,6 @@ with tab_search:
                     st.markdown("---")
 
                 # ----------------====================================
-                # 🛠️ AI自動ステータス判定（企画レースの識別）
-                # ----------------====================================
-                is_kikaku_slot = int(rno_str) in kikaku_master.get(jcd_str, {}).get("kikaku_slots", [])
-                is_under_8r = int(rno_str) <= 8
-                
-                honmei_pct = (similar_100['p'] < 1500).sum()
-                manshu_pct = (similar_100['p'] >= 10000).sum()
-                
-                if is_kikaku_slot and is_under_8r and (similar_100['r1'] == 1.0).sum() >= 65:
-                    status_text = "🔵 企画通り（シード選手が番組の意図通りに逃げ切る確率が極めて高い戦い）"
-                elif honmei_pct >= 40:
-                    status_text = "🟢 ド安定（過去のデータ上、上位人気のカチカチ決着になる確率が非常に高い戦い）"
-                elif manshu_pct >= 20:
-                    status_text = "🔴 大荒れ注意（イン信頼度が低く、万舟や高配当が飛び出す危険な波乱パターン）"
-                elif honmei_pct >= 25:
-                    status_text = "🟡 普通・標準（平均的な本命戦。展開ひとつで中穴へのシフトもあり得る状態）"
-                else:
-                    status_text = "⚪ 波乱含み（本命の信頼度がやや低く、中穴〜大穴の気配が漂うレース）"
-                    
-                st.markdown(f"#### 📊 レースの性質： {status_text}")
-                st.markdown("---")
-
-                # ----------------====================================
                 # ② 全体の頻出着順ベスト3
                 # ------------------------------------------------====
                 st.markdown("## 🏆 全体の頻出着順ベスト3")
@@ -199,116 +223,92 @@ with tab_search:
                     
                 st.pyplot(fig, clear_figure=True)
                 st.caption("※縦軸はレース数（最大100回）。右に山があるほど荒れやすいパターンです。")
+                st.markdown("---")
+
+                # ----------------====================================
+                # ⚙️ 💡 【位置修正】レースの性質（ステータス）をグラフの直下に配置
+                # ----------------====================================
+                is_kikaku_slot = int(rno_str) in kikaku_master.get(jcd_str, {}).get("kikaku_slots", [])
+                is_under_8r = int(rno_str) <= 8
+                
+                honmei_pct = (similar_100['p'] < 1500).sum()
+                manshu_pct = (similar_100['p'] >= 10000).sum()
+                
+                if is_kikaku_slot and is_under_8r and (similar_100['r1'] == 1.0).sum() >= 65:
+                    status_text = "🔵 企画通り（シード選手が番組の意図通りに逃げ切る確率が極めて高い戦い）"
+                elif honmei_pct >= 40:
+                    status_text = "🟢 ド安定（過去のデータ上、上位人気のカチカチ決着になる確率が非常に高い戦い）"
+                elif manshu_pct >= 20:
+                    status_text = "🔴 大荒れ注意（イン信頼度が低く、万舟や高配当が飛び出す危険な波乱パターン）"
+                elif honmei_pct >= 25:
+                    status_text = "🟡 普通・標準（平均的な本命戦。展開ひとつで中穴へのシフトもあり得る状態）"
+                else:
+                    status_text = "⚪ 波乱含み（本命の信頼度がやや低く、中穴〜大穴の気配が漂うレース）"
+                    
+                st.markdown(f"#### 📊 レースの性質： {status_text}")
+
             else:
                 st.error(f"過去データファイルが見つかりません: {file_path}")
         else:
             st.error("当日出走表ファイル（real_time_出走表.csv）が配置されていません。")
 
 # ====================================================
-# 🤖 タブ2: 本日のAI厳選（全競艇場一括スキャン）
+# 🤖 タブ2: 本日のAI厳選（ボタンなし・完全自動読み込み化）
 # ====================================================
 with tab_ai:
     st.markdown("### 🌟 AIがデータから見つけた本日の勝負レース（全場スキャン）")
     st.caption("本日（明日）開催される全競艇場の全レースをGitHub上の出走表から一括解析し、全体の総合トップ5を推薦します。")
     
-    if st.button("全競艇場からAI厳選ランキングを抽出する 🚀", use_container_width=True):
-        if not os.path.exists("real_time_出走表.csv"):
-            st.error("当日出走表データ（real_time_出走表.csv）が見つかりません。")
-        else:
-            df_today = pd.read_csv("real_time_出走表.csv")
-            all_race_results = []
-            
-            with st.spinner("全24場の出走表データをベースに、過去の膨大なパターンと超高速照合中..."):
-                # 当日出走表ファイルにある全ての行をループ
-                for _, row in df_today.iterrows():
-                    jcd_int = int(row['jcd'])
-                    jcd_str = f"{jcd_int:02d}"
-                    venue_full_name = venues_map.get(jcd_str)
-                    
-                    if not venue_full_name:
-                        continue
-                        
-                    csv_file = f"{venue_full_name}.csv"
-                    if not os.path.exists(csv_file):
-                        continue
-                    
-                    # 過去データの読み込みと距離計算
-                    df_past = pd.read_csv(csv_file, encoding='utf-8-sig')
-                    past_patterns = df_past[['相対勝率_1', '相対勝率_2', '相対勝率_3', '相対勝率_4', '相対勝率_5', '相対勝率_6']].values
-                    
-                    rel_rates = [
-                        row['相対勝率_1'], row['相対勝率_2'], row['相対勝率_3'],
-                        row['相対勝率_4'], row['相対勝率_5'], row['相対勝率_6']
-                    ]
-                    
-                    distances = np.linalg.norm(past_patterns - np.array(rel_rates), axis=1)
-                    df_past['tmp_dist'] = distances
-                    similar_100 = df_past.sort_values('tmp_dist').head(100).copy()
-                    similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
-                    
-                    # 指標計算
-                    honmei_count = (similar_100['p'] < 1500).sum()
-                    manshu_count = (similar_100['p'] >= 10000).sum()
-                    in_escape_count = (similar_100['r1'] == 1.0).sum()
-                    
-                    all_race_results.append({
-                        "venue": venue_full_name,
-                        "jcd": jcd_str,
-                        "rno": int(row['r']),
-                        "honmei_rate": honmei_count,
-                        "manshu_rate": manshu_count,
-                        "in_escape_rate": in_escape_count
-                    })
-            
-            if not all_race_results:
-                st.error("解析可能な組み合わせデータがありませんでした。")
-            else:
-                df_all_res = pd.DataFrame(all_race_results)
+    # 💡 ボタンを撤廃し、タブを開いた瞬間に自動でキャッシュからデータを引っ張る仕様に変更
+    df_all_res = generate_ai_ranking_cached()
+    
+    if df_all_res is None:
+        st.error("当日出走表データ（real_time_出走表.csv）が見つからないか、解析可能な組み合わせデータがありません。")
+    else:
+        # 1. 全場一括：ド安定ベスト5
+        st.markdown("#### 🟢 鉄板！ド安定レース（全場総合トップ5）")
+        df_stable = df_all_res.sort_values("honmei_rate", ascending=False).head(5)
+        for _, row in df_stable.iterrows():
+            btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 本命率: {int(row['honmei_rate'])}% ➔"
+            if st.button(btn_label, key=f"all_btn_st_{row['venue']}_{row['rno']}"):
+                st.session_state["target_venue"] = row['venue']
+                st.session_state["target_rno"] = str(int(row['rno']))
+                st.session_state["auto_search"] = True
+                st.rerun()
                 
-                # 1. 全場一括：ド安定ベスト5
-                st.markdown("#### 🟢 鉄板！ド安定レース（全場総合トップ5）")
-                df_stable = df_all_res.sort_values("honmei_rate", ascending=False).head(5)
-                for _, row in df_stable.iterrows():
-                    btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 本命率: {int(row['honmei_rate'])}% ➔"
-                    if st.button(btn_label, key=f"all_btn_st_{row['venue']}_{row['rno']}"):
-                        st.session_state["target_venue"] = row['venue']
-                        st.session_state["target_rno"] = str(int(row['rno']))
-                        st.session_state["auto_search"] = True
-                        st.rerun()
-                        
-                st.markdown("---")
-                
-                # 2. 全場一括：大荒れベスト5
-                st.markdown("#### 🔴 波乱注意！大荒れレース（全場総合トップ5）")
-                df_wild = df_all_res.sort_values("manshu_rate", ascending=False).head(5)
-                for _, row in df_wild.iterrows():
-                    btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 万舟率: {int(row['manshu_rate'])}% ➔"
-                    if st.button(btn_label, key=f"all_btn_wd_{row['venue']}_{row['rno']}"):
-                        st.session_state["target_venue"] = row['venue']
-                        st.session_state["target_rno"] = str(int(row['rno']))
-                        st.session_state["auto_search"] = True
-                        st.rerun()
+        st.markdown("---")
+        
+        # 2. 全場一括：大荒れベスト5
+        st.markdown("#### 🔴 波乱注意！大荒れレース（全場総合トップ5）")
+        df_wild = df_all_res.sort_values("manshu_rate", ascending=False).head(5)
+        for _, row in df_wild.iterrows():
+            btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 万舟率: {int(row['manshu_rate'])}% ➔"
+            if st.button(btn_label, key=f"all_btn_wd_{row['venue']}_{row['rno']}"):
+                st.session_state["target_venue"] = row['venue']
+                st.session_state["target_rno"] = str(int(row['rno']))
+                st.session_state["auto_search"] = True
+                st.rerun()
 
-                st.markdown("---")
-                
-                # 3. 全場一括：企画通りベスト5
-                st.markdown("#### 🔵 軸固定！企画通り狙いレース（全場総合トップ5）")
-                
-                kikaku_rows = []
-                for _, row in df_all_res.iterrows():
-                    if row["rno"] <= 8:  # 1-8R限定の安全フィルター
-                        valid_slots = kikaku_master.get(str(row["jcd"]), {}).get("kikaku_slots", [])
-                        if int(row["rno"]) in valid_slots:
-                            kikaku_rows.append(row)
-                
-                if not kikaku_rows:
-                    st.caption("※本日の1〜8レース内に、条件に合う明らかなシード企画枠はありません。")
-                else:
-                    df_kikaku = pd.DataFrame(kikaku_rows).sort_values("in_escape_rate", ascending=False).head(5)
-                    for _, row in df_kikaku.iterrows():
-                        btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 イン逃げ率: {int(row['in_escape_rate'])}% ➔"
-                        if st.button(btn_label, key=f"all_btn_kk_{row['venue']}_{row['rno']}"):
-                            st.session_state["target_venue"] = row['venue']
-                            st.session_state["target_rno"] = str(int(row['rno']))
-                            st.session_state["auto_search"] = True
-                            st.rerun()
+        st.markdown("---")
+        
+        # 3. 全場一括：企画通りベスト5
+        st.markdown("#### 🔵 軸固定！企画通り狙いレース（全場総合トップ5）")
+        
+        kikaku_rows = []
+        for _, row in df_all_res.iterrows():
+            if row["rno"] <= 8:  # 1-8R限定の安全フィルター
+                valid_slots = kikaku_master.get(str(row["jcd"]), {}).get("kikaku_slots", [])
+                if int(row["rno"]) in valid_slots:
+                    kikaku_rows.append(row)
+        
+        if not kikaku_rows:
+            st.caption("※本日の1〜8レース内に、条件に合う明らかなシード企画枠はありません。")
+        else:
+            df_kikaku = pd.DataFrame(kikaku_rows).sort_values("in_escape_rate", ascending=False).head(5)
+            for _, row in df_kikaku.iterrows():
+                btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 イン逃げ率: {int(row['in_escape_rate'])}% ➔"
+                if st.button(btn_label, key=f"all_btn_kk_{row['venue']}_{row['rno']}"):
+                    st.session_state["target_venue"] = row['venue']
+                    st.session_state["target_rno"] = str(int(row['rno']))
+                    st.session_state["auto_search"] = True
+                    st.rerun()
