@@ -1,0 +1,38 @@
+name: 🚤 競艇当日データ自動スクレイピング
+
+on:
+  schedule:
+    # 💡 ユーザー設計のスケジュール（UTC時刻換算）
+    # GitHubのサーバーは世界標準時(UTC)なので、日本時間(JST)から9時間引いた時刻を設定します。
+    # 24:00 JST -> 15:00 UTC
+    # 06:00 JST -> 21:00 UTC
+    # 08:00 JST -> 23:00 UTC
+    # 10:00 JST -> 01:00 UTC
+    - cron: '0 15,21,23,1 * * *'
+  workflow_dispatch: # 手動で即座にテスト実行するためのボタンも設置
+
+jobs:
+  scrape_and_commit:
+    runs-on: ubuntu-latest
+    steps:
+    - name: コードをチェックアウト
+      uses: actions/checkout@v3
+
+    - name: Python環境をセットアップ
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 必要なライブラリをインストール
+      run: |
+        pip install requests beautifulsoup4 pandas pytz
+
+    - name: スクレイピングを実行
+      run: python scraper.py
+
+    - name: 変更があった場合のみGitHubに自動上書き保存（Commit & Push）
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add real_time_出走表.csv
+        git diff --cached --quiet || (git commit -m "🤖 自動更新: 本日の出走表データをアップデート" && git push)
