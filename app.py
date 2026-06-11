@@ -70,10 +70,11 @@ def get_pattern_column_name(rel_rates, available_columns):
         if f"{max_boat}号艇" in col: return col
     return available_columns[0] if available_columns else None
 
-# --- ⚡ ベイズ期待確率の計算エンジン ---
+# --- ⚡ ベイズ期待確率の計算エンジン（修正版） ---
 def calculate_true_probabilities(rel_rates, similar_100_df, venue_full_name):
     master_path = f"{venue_full_name}_パターン別確率マスタ.csv"
     base_probs = {combo: 100/120 for combo in combo_strings}
+    
     if os.path.exists(master_path):
         df_master = pd.read_csv(master_path, index_col=0)
         col_name = get_pattern_column_name(rel_rates, df_master.columns.tolist())
@@ -85,12 +86,17 @@ def calculate_true_probabilities(rel_rates, similar_100_df, venue_full_name):
     
     raw_expected = {}
     for combo in combo_strings:
-        obs_val = max((obs_counts.get(combo, 0) / total_obs * 100), 0.5) if total_obs > 0 else 0.5
-        base_val = base_probs.get(combo, 0.5)
-        raw_expected[combo] = obs_val * base_val
+        # 100レース側の出現確率を計算
+        obs_val = (obs_counts.get(combo, 0) / total_obs * 100) if total_obs > 0 else 0.0
+        # マスタ側のベース確率
+        base_val = base_probs.get(combo, 0.0)
+        
+        # 💡 修正点：掛け算ではなく「平均（1:1のブレンド）」で算出
+        raw_expected[combo] = (base_val + obs_val) / 2.0
         
     total_raw = sum(raw_expected.values())
-    true_probs = {k: (v / total_raw * 100) for k, v in raw_expected.items()}
+    # 念のための正規化（合計を100%に揃える）
+    true_probs = {k: (v / total_raw * 100) for k, v in raw_expected.items()} if total_raw > 0 else raw_expected
     return dict(sorted(true_probs.items(), key=lambda item: item[1], reverse=True))
 
 # --- ⚡ AI厳選用キャッシュ ---
@@ -287,7 +293,8 @@ with tab_ai:
             df_wild = df_all_res.sort_values("manshu_rate", ascending=False).head(5)
             for _, row in df_wild.iterrows():
                 v_name = row['venue'].split('_')[1]
-                btn_label = f"【{v_name} {int(row['rno'])}R】 万舟発生回数: {int(row['manshu_rate'])}回/100 ➔"
+                # 💡 修正：「万舟率: XX%」に変更
+                btn_label = f"【{v_name} {int(row['rno'])}R】 万舟率: {int(row['manshu_rate'])}% ➔"
                 btn_id = f"wd_{row['venue']}_{row['rno']}"
                 if st.button(btn_label, key=f"all_btn_{btn_id}"):
                     st.session_state.update({"target_venue": row['venue'], "target_rno": str(int(row['rno'])), "auto_search": True, "clicked_btn_key": btn_id})
@@ -300,7 +307,8 @@ with tab_ai:
             df_stable = df_all_res.sort_values("honmei_rate", ascending=False).head(5)
             for _, row in df_stable.iterrows():
                 v_name = row['venue'].split('_')[1]
-                btn_label = f"【{v_name} {int(row['rno'])}R】 1000円以下回数: {int(row['honmei_rate'])}回/100 ➔"
+                # 💡 修正：「本命決着率: XX%」に変更
+                btn_label = f"【{v_name} {int(row['rno'])}R】 本命決着率: {int(row['honmei_rate'])}% ➔"
                 btn_id = f"st_{row['venue']}_{row['rno']}"
                 if st.button(btn_label, key=f"all_btn_{btn_id}"):
                     st.session_state.update({"target_venue": row['venue'], "target_rno": str(int(row['rno'])), "auto_search": True, "clicked_btn_key": btn_id})
