@@ -53,8 +53,6 @@ if "auto_search" not in st.session_state:
     st.session_state["auto_search"] = False
 if "toast_msg" not in st.session_state:
     st.session_state["toast_msg"] = None
-
-# 💡 1番目のバグ対策: エラーを出さずに完全に入力を白紙化するためのリセットカウンター
 if "reset_counter" not in st.session_state:
     st.session_state["reset_counter"] = 0
 
@@ -110,6 +108,15 @@ def generate_ai_ranking_cached(date_str):
 
 
 # ====================================================
+# 🚀 💡 【今回の最重要改善】どのタブにいても見える画面全体ポップアップ通知
+# ====================================================
+if st.session_state["toast_msg"]:
+    # 画面の目立つ場所にふわっと浮き出るトースト通知を発動（押した瞬間その場で出ます）
+    st.toast(st.session_state["toast_msg"], icon="✅")
+    st.session_state["toast_msg"] = None # 1回表示したらクリア
+
+
+# ====================================================
 # 📱 画面レイアウト（標準 st.tabs 構成）
 # ====================================================
 tab_search, tab_ai = st.tabs(["🔍 自分で分析・予想", "🤖 本日のAI厳選"])
@@ -118,12 +125,12 @@ tab_search, tab_ai = st.tabs(["🔍 自分で分析・予想", "🤖 本日のAI
 # 🔍 タブ1: 自分で分析・予想
 # ====================================================
 with tab_search:
-    # 連動通知メッセージがあればふわっと上部に表示
-    if st.session_state["toast_msg"]:
-        st.success(st.session_state["toast_msg"])
-        st.session_state["toast_msg"] = None # 1回出したら消去
-        
     st.markdown("### 1. レース情報の指定")
+    
+    # 💡 UI/UX向上：AI厳選から今セットされている状態であることを薄く明示
+    if st.session_state["auto_search"] or st.session_state.get("last_loaded"):
+        st.caption(f"💡 現在選択中：{st.session_state['target_venue'].split('_')[1]} {st.session_state['target_rno']}R (AI厳選からの連動状態)")
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -142,7 +149,6 @@ with tab_search:
     st.markdown("### 🎯 あなたの予想（フォーメーション）")
     st.caption("※入力しなくても類似レースの検索は可能です")
 
-    # キー変更トリック用のIDをセッションから取得
     rid = st.session_state["reset_counter"]
 
     c1, c2, c3 = st.columns(3)
@@ -163,7 +169,6 @@ with tab_search:
         all_3 = st.toggle("【全】", key=f"m_all_3_{rid}")
         pred_3 = boat_options if all_3 else st.multiselect("3着", boat_options, placeholder="選択..", label_visibility="collapsed", key=f"key_3_{rid}")
 
-    # 💡 1番目のバグ修正: keyごと破壊して新しく生成し直すため、100%エラーが出ないクリアボタン
     if st.button("❌ 予想入力をすべてクリアする", use_container_width=True):
         st.session_state["reset_counter"] += 1
         st.rerun()
@@ -178,12 +183,9 @@ with tab_search:
     if search_triggered:
         if os.path.exists("real_time_出走表.csv"):
             df_today = pd.read_csv("real_time_出走表.csv")
-            
-            # 当日の出走表から該当レースを抽出
             df_target = df_today[(df_today['jcd'] == int(jcd_str)) & (df_today['r'] == int(rno_str))]
             file_path = f"{selected_venue}.csv"
             
-            # 💡 3番目のバグ修正: ランダム代用を完全廃止し、「データ無し」を明示して処理を止める
             if df_target.empty:
                 st.warning(f"⚠️ **【レース情報無し】** 本日、{selected_venue.split('_')[1]}競艇場の第 {rno_str} レースの当日データは存在しません。")
                 st.info("本日この場が非開催であるか、あるいはデータ自動更新前の時間帯である可能性があります。")
@@ -290,12 +292,13 @@ with tab_ai:
                 venue_name_only = row['venue'].split('_')[1]
                 btn_label = f"【{venue_name_only} {int(row['rno'])}R】 1000円以下確率: {int(row['honmei_rate'])}% ➔"
                 
-                # 💡 2番目のバグ修正: 値をセットした瞬間に st.rerun() をかけ、セレクトボックスの初期値を完全に同期させる
                 if st.button(btn_label, key=f"all_btn_st_{row['venue']}_{row['rno']}"):
                     st.session_state["target_venue"] = row['venue']
                     st.session_state["target_rno"] = str(int(row['rno']))
                     st.session_state["auto_search"] = True
-                    st.session_state["toast_msg"] = f"✅ 【{venue_name_only} {int(row['rno'])}R】を自動入力しました！「🔍 自分で分析・予想」タブを開いてください。"
+                    # 💡 【修正点】押した瞬間その場で通知が出るようにメッセージをセット
+                    st.session_state["toast_msg"] = f"【{venue_name_only} {int(row['rno'])}R】をセット完了！上の『🔍 自分で分析・予想』タブを開いてください。"
+                    st.session_state["last_loaded"] = True
                     st.rerun()
                     
             st.markdown("---")
@@ -310,32 +313,5 @@ with tab_ai:
                     st.session_state["target_venue"] = row['venue']
                     st.session_state["target_rno"] = str(int(row['rno']))
                     st.session_state["auto_search"] = True
-                    st.session_state["toast_msg"] = f"✅ 【{venue_name_only} {int(row['rno'])}R】を自動入力しました！「🔍 自分で分析・予想」タブを開いてください。"
-                    st.rerun()
-
-            st.markdown("---")
-            
-            # 3. 全場一括：企画通りベスト5
-            st.markdown("#### 🔵 軸固定！企画通り狙いレース（全場総合トップ5）")
-            st.caption("1〜8Rの企画枠限定。データの『相対勝率1位が1着』にきて、かつ『相対勝率2位が2着か3着』にカチッと嵌まる確率が最も高い狙い打ちレースです。")
-            
-            kikaku_rows = []
-            for _, row in df_all_res.iterrows():
-                if row["rno"] <= 8: 
-                    valid_slots = kikaku_master.get(str(row["jcd"]), {}).get("kikaku_slots", [])
-                    if int(row["rno"]) in valid_slots:
-                        kikaku_rows.append(row)
-            
-            if not kikaku_rows:
-                st.caption("※本日の1〜8レース内に、新ロジックの条件に合うシード企画枠はありません。")
-            else:
-                df_kikaku = pd.DataFrame(kikaku_rows).sort_values("kikaku_rate", ascending=False).head(5)
-                for _, row in df_kikaku.iterrows():
-                    venue_name_only = row['venue'].split('_')[1]
-                    btn_label = f"【{venue_name_only} {int(row['rno'])}R】 1強➔2強追従確率: {int(row['kikaku_rate'])}% ➔"
-                    if st.button(btn_label, key=f"all_btn_kk_{row['venue']}_{row['rno']}"):
-                        st.session_state["target_venue"] = row['venue']
-                        st.session_state["target_rno"] = str(int(row['rno']))
-                        st.session_state["auto_search"] = True
-                        st.session_state["toast_msg"] = f"✅ 【{venue_name_only} {int(row['rno'])}R】を自動入力しました！「🔍 自分で分析・予想」タブを開いてください。"
-                        st.rerun()
+                    st.session_state["toast_msg"] = f"【{venue_name_only} {int(row['rno'])}R】をセット完了！上の『🔍 自分で分析・予想』タブを開いてください。"
+                    st.session_state["last_loaded"] = True
