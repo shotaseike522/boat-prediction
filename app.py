@@ -43,8 +43,8 @@ if os.path.exists("real_time_出走表.csv"):
         pass
 
 # --- 🔄 セッション状態初期化 ---
-if "target_venue" not in st.session_state: st.session_state["target_venue"] = "09_津" 
-if "target_rno" not in st.session_state: st.session_state["target_rno"] = "1"
+if "target_venue" not in st.session_state: st.session_state["target_venue"] = "" 
+if "target_rno" not in st.session_state: st.session_state["target_rno"] = ""
 if "auto_search" not in st.session_state: st.session_state["auto_search"] = False
 if "reset_counter" not in st.session_state: st.session_state["reset_counter"] = 0
 if "clicked_btn_key" not in st.session_state: st.session_state["clicked_btn_key"] = None
