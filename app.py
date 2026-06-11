@@ -42,20 +42,18 @@ if os.path.exists("real_time_出走表.csv"):
     except:
         pass
 
-# --- 🔄 セッション状態初期化 ---
-if "target_venue" not in st.session_state: st.session_state["target_venue"] = "" 
-if "target_rno" not in st.session_state: st.session_state["target_rno"] = ""
+# --- 🔄 セッション状態初期化（💡 デフォルトを全て None = 空欄に変更） ---
+if "target_venue" not in st.session_state: st.session_state["target_venue"] = None 
+if "target_rno" not in st.session_state: st.session_state["target_rno"] = None
 if "auto_search" not in st.session_state: st.session_state["auto_search"] = False
 if "reset_counter" not in st.session_state: st.session_state["reset_counter"] = 0
 if "clicked_btn_key" not in st.session_state: st.session_state["clicked_btn_key"] = None
 
-# --- 🧠 【重要】AIマスタ型の動的判定ロジック ---
+# --- 🧠 AIマスタ型の動的判定ロジック ---
 def get_pattern_column_name(rel_rates, available_columns):
-    """今日の勝率からAIクラスタの型名を逆算推測し、マスタの列を特定する"""
     max_boat = np.argmax(rel_rates) + 1
     strongs = [i+1 for i, val in enumerate(rel_rates) if val >= 0.5]
     weaks = [i+1 for i, val in enumerate(rel_rates) if val <= -0.8]
-    
     if max_boat == 1 and rel_rates[0] > 0.8:
         guess = "1強_6号艇ド弱型" if 6 in weaks else "1号艇一強_王道型"
     elif rel_rates[0] < -0.1 and (2 in strongs or 3 in strongs or 4 in strongs):
@@ -66,7 +64,6 @@ def get_pattern_column_name(rel_rates, available_columns):
         guess = f"{weaks[0]}号艇ド弱_壁抜け型"
     else:
         guess = f"{max_boat}号艇軸_標準型"
-        
     for col in available_columns:
         if guess in col: return col
     for col in available_columns:
@@ -75,81 +72,52 @@ def get_pattern_column_name(rel_rates, available_columns):
 
 # --- ⚡ ベイズ期待確率の計算エンジン ---
 def calculate_true_probabilities(rel_rates, similar_100_df, venue_full_name):
-    # 1. マスタ（事前確率）の読み込み
     master_path = f"{venue_full_name}_パターン別確率マスタ.csv"
-    base_probs = {combo: 100/120 for combo in combo_strings} # 基準フラット
-    
+    base_probs = {combo: 100/120 for combo in combo_strings}
     if os.path.exists(master_path):
         df_master = pd.read_csv(master_path, index_col=0)
         col_name = get_pattern_column_name(rel_rates, df_master.columns.tolist())
-        if col_name:
-            base_probs = df_master[col_name].to_dict()
+        if col_name: base_probs = df_master[col_name].to_dict()
 
-    # 2. 類似100レース（尤度）の集計
-    def make_result_str(row): return f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}"
-    similar_100_df['3連単'] = similar_100_df.apply(make_result_str, axis=1)
+    similar_100_df['3連単'] = similar_100_df.apply(lambda row: f"{int(row['r1'])}-{int(row['r2'])}-{int(row['r3'])}", axis=1)
     obs_counts = similar_100_df['3連単'].value_counts().to_dict()
     total_obs = len(similar_100_df)
     
-    # 3. ベイズ更新（スムージング付き）と正規化
     raw_expected = {}
     for combo in combo_strings:
-        # 0回でも0.5%の可能性を持たせる（ラプラススムージング）
         obs_val = max((obs_counts.get(combo, 0) / total_obs * 100), 0.5) if total_obs > 0 else 0.5
         base_val = base_probs.get(combo, 0.5)
         raw_expected[combo] = obs_val * base_val
         
     total_raw = sum(raw_expected.values())
     true_probs = {k: (v / total_raw * 100) for k, v in raw_expected.items()}
-    
-    # 高い順にソートして返す
     return dict(sorted(true_probs.items(), key=lambda item: item[1], reverse=True))
 
-# --- ⚡ AI厳選用：一括計算キャッシュロジック ---
+# --- ⚡ AI厳選用キャッシュ ---
 @st.cache_data(ttl=1800) 
 def generate_ai_ranking_cached(date_str):
     if not os.path.exists("real_time_出走表.csv"): return None
-        
     df_today = pd.read_csv("real_time_出走表.csv")
     all_race_results = []
-    
     for _, row in df_today.iterrows():
         jcd_str = f"{int(row['jcd']):02d}"
         venue_full_name = venues_map.get(jcd_str)
         if not venue_full_name or not os.path.exists(f"{venue_full_name}.csv"): continue
-        
-        rel_rates = [row['相対勝率_1'], row['相対勝率_2'], row['相対勝率_3'], row['相対勝率_4'], row['相対勝率_5'], row['相対勝率_6']]
-        
-        # 類似100レース抽出
+        rel_rates = [row[f'相対勝率_{i}'] for i in range(1, 7)]
         df_past = pd.read_csv(f"{venue_full_name}.csv", encoding='utf-8-sig')
         past_patterns = df_past[['相対勝率_1', '相対勝率_2', '相対勝率_3', '相対勝率_4', '相対勝率_5', '相対勝率_6']].values
-        distances = np.linalg.norm(past_patterns - np.array(rel_rates), axis=1)
-        df_past['tmp_dist'] = distances
+        df_past['tmp_dist'] = np.linalg.norm(past_patterns - np.array(rel_rates), axis=1)
         similar_100 = df_past.sort_values('tmp_dist').head(100).copy()
         similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
-        
-        honmei_count = (similar_100['p'] <= 1000).sum()
-        manshu_count = (similar_100['p'] >= 10000).sum()
-        
-        # 真の確率計算
         true_probs = calculate_true_probabilities(rel_rates, similar_100, venue_full_name)
-        
-        # 企画通りの確率合算（1番手➔2番手追従）
         sorted_rel = sorted({i+1: rel_rates[i] for i in range(6)}.items(), key=lambda x: x[1], reverse=True)
         top1, top2 = str(sorted_rel[0][0]), str(sorted_rel[1][0])
-        
-        kikaku_prob_sum = 0
-        for combo, prob in true_probs.items():
-            c = combo.split('-')
-            if c[0] == top1 and (c[1] == top2 or c[2] == top2):
-                kikaku_prob_sum += prob
-        
+        kikaku_prob_sum = sum([p for c, p in true_probs.items() if c.startswith(top1) and (c.split('-')[1] == top2 or c.split('-')[2] == top2)])
         all_race_results.append({
             "venue": venue_full_name, "jcd": jcd_str, "rno": int(row['r']),
-            "honmei_rate": honmei_count, "manshu_rate": manshu_count,
+            "honmei_rate": (similar_100['p'] <= 1000).sum(), "manshu_rate": (similar_100['p'] >= 10000).sum(),
             "kikaku_prob": kikaku_prob_sum
         })
-        
     return pd.DataFrame(all_race_results) if all_race_results else None
 
 # ====================================================
@@ -162,18 +130,23 @@ tab_search, tab_ai = st.tabs(["🔍 自分で分析・予想", "🤖 本日のAI
 # ====================================================
 with tab_search:
     st.markdown("### 1. レース情報の指定")
-    if st.session_state["auto_search"] or st.session_state.get("clicked_btn_key"):
-        st.caption(f"💡 現在選択中：{st.session_state['target_venue'].split('_')[1]} {st.session_state['target_rno']}R")
+    
+    # AI選択状態のガイダンス表示
+    if st.session_state["target_venue"] and st.session_state["target_rno"]:
+        if st.session_state["auto_search"] or st.session_state.get("clicked_btn_key"):
+            st.caption(f"💡 現在選択中：{st.session_state['target_venue'].split('_')[1]} {st.session_state['target_rno']}R")
 
     col1, col2 = st.columns(2)
     with col1:
-        v_idx = venues_list.index(st.session_state["target_venue"]) if st.session_state["target_venue"] in venues_list else 8
-        selected_venue = st.selectbox("📌 競艇場", venues_list, index=v_idx)
-        jcd_str = selected_venue.split("_")[0] 
+        # 💡 index=None にすることで初期状態を完全な空欄（未選択）に
+        v_idx = venues_list.index(st.session_state["target_venue"]) if st.session_state["target_venue"] in venues_list else None
+        selected_venue = st.selectbox("📌 競艇場", venues_list, index=v_idx, placeholder="👉 競艇場を選択してください")
+        jcd_str = selected_venue.split("_")[0] if selected_venue else None
+
     with col2:
         r_options = [str(i) for i in range(1, 13)]
-        r_idx = r_options.index(st.session_state["target_rno"]) if st.session_state["target_rno"] in r_options else 0
-        rno_str = st.selectbox("🚤 レース番号", r_options, index=r_idx)
+        r_idx = r_options.index(st.session_state["target_rno"]) if st.session_state["target_rno"] in r_options else None
+        rno_str = st.selectbox("🚤 レース番号", r_options, index=r_idx, placeholder="👉 レース番号を選択")
 
     st.markdown("---")
     st.markdown("### 🎯 あなたの予想（フォーメーション）")
@@ -195,9 +168,13 @@ with tab_search:
 
     if st.button("❌ 予想入力をすべてクリアする", use_container_width=True):
         st.session_state["reset_counter"] += 1
+        st.session_state["target_venue"] = None # 💡 クリア時に競艇場も白紙化
+        st.session_state["target_rno"] = None   # 💡 クリア時にレースも白紙化
         st.rerun()
 
     st.markdown("---")
+    
+    # 💡 どちらかが未選択の場合はボタンを押したときに警告を出す安全ガード
     search_triggered = st.button("レースを分析する 🔍", use_container_width=True)
     if search_triggered: st.session_state["clicked_btn_key"] = None
     if st.session_state["auto_search"]:
@@ -205,7 +182,9 @@ with tab_search:
         st.session_state["auto_search"] = False 
 
     if search_triggered:
-        if os.path.exists("real_time_出走表.csv"):
+        if not selected_venue or not rno_str:
+            st.warning("⚠️ **【未選択エラー】** 先に「競艇場」と「レース番号」を上部ドロップダウンから選択してください。")
+        elif os.path.exists("real_time_出走表.csv"):
             df_today = pd.read_csv("real_time_出走表.csv")
             df_target = df_today[(df_today['jcd'] == int(jcd_str)) & (df_today['r'] == int(rno_str))]
             file_path = f"{selected_venue}.csv"
@@ -214,14 +193,12 @@ with tab_search:
                 st.warning(f"⚠️ **【レース情報無し】** 本日、{selected_venue.split('_')[1]}競艇場の第 {rno_str} レースの当日データは存在しません。")
             else:
                 rel_rates = [df_target.iloc[0][f'相対勝率_{i}'] for i in range(1, 7)]
-                
                 df_past = pd.read_csv(file_path, encoding='utf-8-sig')
                 past_patterns = df_past[['相対勝率_1', '相対勝率_2', '相対勝率_3', '相対勝率_4', '相対勝率_5', '相対勝率_6']].values
                 df_past['距離'] = np.linalg.norm(past_patterns - np.array(rel_rates), axis=1)
                 similar_100 = df_past.sort_values('距離').head(100).copy()
                 similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
 
-                # 🎯 真の期待確率を計算
                 true_probs = calculate_true_probabilities(rel_rates, similar_100, selected_venue)
 
                 # ① フォーメーション予想結果
@@ -229,11 +206,9 @@ with tab_search:
                     st.markdown("### 🎯 あなたのフォーメーション評価")
                     raw_combos = list(itertools.product(pred_1, pred_2, pred_3))
                     valid_combos = [f"{c[0]}-{c[1]}-{c[2]}" for c in raw_combos if len(set(c)) == 3]
-                    
                     if valid_combos:
                         my_prob_sum = sum([true_probs.get(c, 0) for c in valid_combos])
                         st.info(f"あなたの買い目（計**{len(valid_combos)}点**）の真の合算期待確率: **{my_prob_sum:.1f}%**")
-                        
                         my_probs = {c: true_probs.get(c, 0) for c in valid_combos}
                         top_my_probs = dict(sorted(my_probs.items(), key=lambda x: x[1], reverse=True)[:5])
                         st.markdown("#### 🌟 予想内の期待値ベスト5")
@@ -268,10 +243,8 @@ with tab_search:
                 r_int = int(rno_str)
                 honmei_pct = (similar_100['p'] <= 1000).sum()  
                 manshu_pct = (similar_100['p'] >= 10000).sum()
-                
                 sorted_rel = sorted({i+1: rel_rates[i] for i in range(6)}.items(), key=lambda x: x[1], reverse=True)
                 top1, top2 = str(sorted_rel[0][0]), str(sorted_rel[1][0])
-                
                 kikaku_prob_sum = sum([p for c, p in true_probs.items() if c.startswith(top1) and (c.split('-')[1] == top2 or c.split('-')[2] == top2)])
 
                 if r_int <= 8 and kikaku_prob_sum >= 25.0:
@@ -282,7 +255,6 @@ with tab_search:
                     status_text = f"🟢 ド安定（過去100回中{honmei_pct}回が1000円以下の本命決着。上位数点に絞って厚め勝負）"
                 else:
                     status_text = "⚪ 波乱含み / 🟡 普通（極端な傾向なし。直前のオッズと展示を見て判断）"
-                    
                 st.markdown(f"#### 📊 レースの性質： {status_text}")
         else: st.error("当日出走表ファイルが配置されていません。")
 
@@ -291,7 +263,6 @@ with tab_search:
 # ====================================================
 with tab_ai:
     st.markdown(f"### 🌟 本日 ({display_today}) のAI厳選 各ベスト5")
-    
     if not is_data_today:
         st.warning("⚠️ **【本日のデータは現在更新待ちです】**")
     else:
@@ -300,7 +271,6 @@ with tab_ai:
             
             # 1. 企画通り ベスト5
             st.markdown("#### 🔵 企画通り・軸固定レース ベスト5")
-            st.caption("1〜8R限定。AI計算の『真の期待確率』において、1強➔2強の決着確率が最も高いレース。")
             df_kikaku = df_all_res[df_all_res["rno"] <= 8].sort_values("kikaku_prob", ascending=False).head(5)
             for _, row in df_kikaku.iterrows():
                 v_name = row['venue'].split('_')[1]
@@ -314,7 +284,6 @@ with tab_ai:
             
             # 2. 大穴注意 ベスト5
             st.markdown("#### 🔴 大荒れ・波乱注意レース ベスト5")
-            st.caption("配当実績において、過去に万舟（1万円以上）が飛び出した回数が最も多いレース。")
             df_wild = df_all_res.sort_values("manshu_rate", ascending=False).head(5)
             for _, row in df_wild.iterrows():
                 v_name = row['venue'].split('_')[1]
@@ -328,7 +297,6 @@ with tab_ai:
 
             # 3. ド安定 ベスト5
             st.markdown("#### 🟢 ガチガチ・本命レース ベスト5")
-            st.caption("配当実績において、過去に1,000円以下の極小配当で決まった回数が最も多いレース。")
             df_stable = df_all_res.sort_values("honmei_rate", ascending=False).head(5)
             for _, row in df_stable.iterrows():
                 v_name = row['venue'].split('_')[1]
