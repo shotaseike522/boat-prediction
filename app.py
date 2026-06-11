@@ -51,8 +51,14 @@ if "target_rno" not in st.session_state:
     st.session_state["target_rno"] = "1"
 if "auto_search" not in st.session_state:
     st.session_state["auto_search"] = False
+if "toast_msg" not in st.session_state:
+    st.session_state["toast_msg"] = None
 
-# --- ⚡ 4. AI厳選用：新ロジック対応・一括計算キャッシュ ---
+# 💡 1番目のバグ対策: エラーを出さずに完全に入力を白紙化するためのリセットカウンター
+if "reset_counter" not in st.session_state:
+    st.session_state["reset_counter"] = 0
+
+# --- ⚡ 4. AI厳選用：一括計算キャッシュロジック ---
 @st.cache_data(ttl=1800) 
 def generate_ai_ranking_cached(date_str):
     if not os.path.exists("real_time_出走表.csv"):
@@ -69,14 +75,13 @@ def generate_ai_ranking_cached(date_str):
         if not venue_full_name or not os.path.exists(f"{venue_full_name}.csv"):
             continue
         
-        # 💡 新ロジック：当日の出走表から「1番強い艇」と「2番目に強い艇」を特定
         rel_win_rates = {
             1: row['相対勝率_1'], 2: row['相対勝率_2'], 3: row['相対勝率_3'],
             4: row['相対勝率_4'], 5: row['相対勝率_5'], 6: row['相対勝率_6']
         }
         sorted_boats = sorted(rel_win_rates, key=rel_win_rates.get, reverse=True)
-        top1_boat = sorted_boats[0]  # 相対勝率が1番高い号艇 (1~6)
-        top2_boat = sorted_boats[1]  # 相対勝率が2番目に高い号艇 (1~6)
+        top1_boat = sorted_boats[0]
+        top2_boat = sorted_boats[1]
         
         df_past = pd.read_csv(f"{venue_full_name}.csv", encoding='utf-8-sig')
         past_patterns = df_past[['相対勝率_1', '相対勝率_2', '相対勝率_3', '相対勝率_4', '相対勝率_5', '相対勝率_6']].values
@@ -87,11 +92,9 @@ def generate_ai_ranking_cached(date_str):
         similar_100 = df_past.sort_values('tmp_dist').head(100).copy()
         similar_100['p'] = pd.to_numeric(similar_100['p'], errors='coerce').fillna(0)
         
-        # 各種指標の計算
-        honmei_count = (similar_100['p'] <= 1000).sum()  # 💡 1000円以下に基準引き上げ
+        honmei_count = (similar_100['p'] <= 1000).sum()
         manshu_count = (similar_100['p'] >= 10000).sum()
         
-        # 💡 新ロジック「企画の軸固定」：1着が1番強い艇、かつ2着または3着に2番目に強い艇が入る確率
         kikaku_success_count = ((similar_100['r1'] == top1_boat) & ((similar_100['r2'] == top2_boat) | (similar_100['r3'] == top2_boat))).sum()
         
         all_race_results.append({
@@ -107,7 +110,7 @@ def generate_ai_ranking_cached(date_str):
 
 
 # ====================================================
-# 📱 画面レイアウト（ご要望通り、標準の st.tabs に完全切り戻し）
+# 📱 画面レイアウト（標準 st.tabs 構成）
 # ====================================================
 tab_search, tab_ai = st.tabs(["🔍 自分で分析・予想", "🤖 本日のAI厳選"])
 
@@ -115,6 +118,11 @@ tab_search, tab_ai = st.tabs(["🔍 自分で分析・予想", "🤖 本日のAI
 # 🔍 タブ1: 自分で分析・予想
 # ====================================================
 with tab_search:
+    # 連動通知メッセージがあればふわっと上部に表示
+    if st.session_state["toast_msg"]:
+        st.success(st.session_state["toast_msg"])
+        st.session_state["toast_msg"] = None # 1回出したら消去
+        
     st.markdown("### 1. レース情報の指定")
     col1, col2 = st.columns(2)
 
@@ -134,29 +142,30 @@ with tab_search:
     st.markdown("### 🎯 あなたの予想（フォーメーション）")
     st.caption("※入力しなくても類似レースの検索は可能です")
 
+    # キー変更トリック用のIDをセッションから取得
+    rid = st.session_state["reset_counter"]
+
     c1, c2, c3 = st.columns(3)
     boat_options = [1, 2, 3, 4, 5, 6]
 
     with c1:
         st.markdown("#### 🥇 1着")
-        all_1 = st.toggle("【全】", key="m_all_1")
-        pred_1 = boat_options if all_1 else st.multiselect("1着", boat_options, placeholder="選択..", label_visibility="collapsed", key="sel_1")
+        all_1 = st.toggle("【全】", key=f"m_all_1_{rid}")
+        pred_1 = boat_options if all_1 else st.multiselect("1着", boat_options, placeholder="選択..", label_visibility="collapsed", key=f"sel_1_{rid}")
 
     with c2:
         st.markdown("#### 🥈 2着")
-        all_2 = st.toggle("【全】", key="m_all_2")
-        pred_2 = boat_options if all_2 else st.multiselect("2着", boat_options, placeholder="選択..", label_visibility="collapsed", key="sel_2")
+        all_2 = st.toggle("【全】", key=f"m_all_2_{rid}")
+        pred_2 = boat_options if all_2 else st.multiselect("2着", boat_options, placeholder="選択..", label_visibility="collapsed", key=f"sel_2_{rid}")
 
     with c3:
         st.markdown("#### 🥉 3着")
-        all_3 = st.toggle("【全】", key="m_all_3")
-        pred_3 = boat_options if all_3 else st.multiselect("3着", boat_options, placeholder="選択..", label_visibility="collapsed", key="key_3")
+        all_3 = st.toggle("【全】", key=f"m_all_3_{rid}")
+        pred_3 = boat_options if all_3 else st.multiselect("3着", boat_options, placeholder="選択..", label_visibility="collapsed", key=f"key_3_{rid}")
 
-    # 💡 UI/UX改善: 一発リセットボタン
+    # 💡 1番目のバグ修正: keyごと破壊して新しく生成し直すため、100%エラーが出ないクリアボタン
     if st.button("❌ 予想入力をすべてクリアする", use_container_width=True):
-        for k in ["sel_1", "sel_2", "key_3", "m_all_1", "m_all_2", "m_all_3"]:
-            if k in st.session_state:
-                st.session_state[k] = False if "all" in k else []
+        st.session_state["reset_counter"] += 1
         st.rerun()
 
     st.markdown("---")
@@ -169,18 +178,19 @@ with tab_search:
     if search_triggered:
         if os.path.exists("real_time_出走表.csv"):
             df_today = pd.read_csv("real_time_出走表.csv")
+            
+            # 当日の出走表から該当レースを抽出
             df_target = df_today[(df_today['jcd'] == int(jcd_str)) & (df_today['r'] == int(rno_str))]
-            
             file_path = f"{selected_venue}.csv"
-            if df_target.empty and os.path.exists(file_path):
-                df_target = pd.read_csv(file_path).sample(n=1)
-                st.warning("⚠️ 当日出走表にデータがないため、過去データからランダム代用して解析しています。")
             
-            if not df_target.empty and os.path.exists(file_path):
+            # 💡 3番目のバグ修正: ランダム代用を完全廃止し、「データ無し」を明示して処理を止める
+            if df_target.empty:
+                st.warning(f"⚠️ **【レース情報無し】** 本日、{selected_venue.split('_')[1]}競艇場の第 {rno_str} レースの当日データは存在しません。")
+                st.info("本日この場が非開催であるか、あるいはデータ自動更新前の時間帯である可能性があります。")
+            else:
                 mock_row = df_target.iloc[0]
                 rel_rates = [mock_row['相対勝率_1'], mock_row['相対勝率_2'], mock_row['相対勝率_3'], mock_row['相対勝率_4'], mock_row['相対勝率_5'], mock_row['相対勝率_6']]
                 
-                # 💡 新ロジック用の艇特定
                 rel_win_rates = {i+1: rel_rates[i] for i in range(6)}
                 sorted_boats = sorted(rel_win_rates, key=rel_win_rates.get, reverse=True)
                 top1_boat, top2_boat = sorted_boats[0], sorted_boats[1]
@@ -220,7 +230,7 @@ with tab_search:
 
                 # ③ 配当分布グラフ
                 st.markdown("### 📈 類似100レースの配当分布（金額帯）")
-                bins = [0, 1000, 3000, 5000, 10000, 30000, 1000000] # 💡 1000円に境界を変更
+                bins = [0, 1000, 3000, 5000, 10000, 30000, 1000000] 
                 labels = ['~1.0k', '1.0k~3k', '3k~5k', '5k~10k', '10k~30k', '30k~']
                 similar_100['配当帯'] = pd.cut(similar_100['p'], bins=bins, labels=labels, right=False)
                 dist = similar_100['配当帯'].value_counts().reindex(labels).fillna(0)
@@ -235,18 +245,17 @@ with tab_search:
                 st.caption("※縦軸はレース数。右に山があるほど荒れやすいパターンです。")
                 st.markdown("---")
 
-                # ⚙️ 💡 【位置固定】レースの性質（ステータス判定）
+                # レースの性質（ステータス判定）
                 is_kikaku_slot = int(rno_str) in kikaku_master.get(jcd_str, {}).get("kikaku_slots", [])
                 is_under_8r = int(rno_str) <= 8
-                honmei_pct = (similar_100['p'] <= 1000).sum()  # 💡 1000円以下
+                honmei_pct = (similar_100['p'] <= 1000).sum()  
                 manshu_pct = (similar_100['p'] >= 10000).sum()
                 
-                # 新ロジックに合わせたステータス条件文の微調整
                 kikaku_pct = ((similar_100['r1'] == top1_boat) & ((similar_100['r2'] == top2_boat) | (similar_100['r3'] == top2_boat))).sum()
 
                 if is_kikaku_slot and is_under_8r and kikaku_pct >= 50:
                     status_text = f"🔵 企画通り（1番強い【{top1_boat}号艇】が勝ち、2番目に強い【{top2_boat}号艇】が2-3着に追従する確率が極めて高い番組）"
-                elif honmei_pct >= 30: # 1000円以下が3割以上は超手堅い
+                elif honmei_pct >= 30: 
                     status_text = "🟢 ド安定（過去のデータ上、3連単1,000円以下の極小配当でカチカチに決まる確率が非常に高いレース）"
                 elif manshu_pct >= 20:
                     status_text = "🔴 大荒れ注意（イン信頼度が極めて低く、万舟や高配当が飛び出す危険な波乱パターン）"
@@ -259,33 +268,35 @@ with tab_search:
         else: st.error("当日出走表ファイルが配置されていません。")
 
 # ====================================================
-# 🤖 タブ2: 本日のAI厳選（日付安全チェック＆新ロジック完全自動表示）
+# 🤖 タブ2: 本日のAI厳選
 # ====================================================
 with tab_ai:
     st.markdown(f"### 🌟 AIがデータから見つけた本日 ({display_today}) の勝負レース")
     
-    # 💡 安全装置：今日の日付のデータがまだGitHubに無ければ警告を出して停止
     if not is_data_today:
         st.warning(f"⚠️ **【本日のデータは現在更新待ちです】**")
-        st.info("表示データが昨日のまま誤爆するのを防ぐため、ランキングを非表示にしています。深夜の自動スクレイピング、または朝6:00以降の自動リトライ更新が完了するまでもうしばらくお待ちください。")
+        st.info("表示データが昨日のまま誤爆するのを防ぐため、ランキングを非表示にしています。深夜の自動スクレイピング更新が完了するまでもうしばらくお待ちください。")
     else:
-        # 今日の日付のデータがある時だけ自動で一括スキャンを実行
         df_all_res = generate_ai_ranking_cached(today_jst)
         
         if df_all_res is None:
             st.error("解析可能な組み合わせデータがありません。")
         else:
-            # 1. 全場一括：ド安定ベスト5（1000円以下確率順）
+            # 1. 全場一括：ド安定ベスト5
             st.markdown("#### 🟢 鉄板！ド安定レース（全場総合トップ5）")
-            st.caption("過去の類似パターンにおいて【3連単 1,000円以下】の極小本命配当で決着した確率が最も高い超堅実レースです。")
+            st.caption("過去の類似パターンにおいて【3連単 1,000円以下】の本命配当で決着した確率が最も高い超堅実レースです。")
             df_stable = df_all_res.sort_values("honmei_rate", ascending=False).head(5)
             for _, row in df_stable.iterrows():
-                btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 1000円以下確率: {int(row['honmei_rate'])}% ➔"
+                venue_name_only = row['venue'].split('_')[1]
+                btn_label = f"【{venue_name_only} {int(row['rno'])}R】 1000円以下確率: {int(row['honmei_rate'])}% ➔"
+                
+                # 💡 2番目のバグ修正: 値をセットした瞬間に st.rerun() をかけ、セレクトボックスの初期値を完全に同期させる
                 if st.button(btn_label, key=f"all_btn_st_{row['venue']}_{row['rno']}"):
                     st.session_state["target_venue"] = row['venue']
                     st.session_state["target_rno"] = str(int(row['rno']))
                     st.session_state["auto_search"] = True
-                    st.success(f"📌 【{row['venue'].split('_')[1]} {int(row['rno'])}R】をセットしました！上の「🔍 自分で分析・予想」タブを開いてください。")
+                    st.session_state["toast_msg"] = f"✅ 【{venue_name_only} {int(row['rno'])}R】を自動入力しました！「🔍 自分で分析・予想」タブを開いてください。"
+                    st.rerun()
                     
             st.markdown("---")
             
@@ -293,16 +304,18 @@ with tab_ai:
             st.markdown("#### 🔴 波乱注意！大荒れレース（全場総合トップ5）")
             df_wild = df_all_res.sort_values("manshu_rate", ascending=False).head(5)
             for _, row in df_wild.iterrows():
-                btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 万舟率: {int(row['manshu_rate'])}% ➔"
+                venue_name_only = row['venue'].split('_')[1]
+                btn_label = f"【{venue_name_only} {int(row['rno'])}R】 万舟率: {int(row['manshu_rate'])}% ➔"
                 if st.button(btn_label, key=f"all_btn_wd_{row['venue']}_{row['rno']}"):
                     st.session_state["target_venue"] = row['venue']
                     st.session_state["target_rno"] = str(int(row['rno']))
                     st.session_state["auto_search"] = True
-                    st.success(f"📌 【{row['venue'].split('_')[1]} {int(row['rno'])}R】をセットしました！上の「🔍 自分で分析・予想」タブを開いてください。")
+                    st.session_state["toast_msg"] = f"✅ 【{venue_name_only} {int(row['rno'])}R】を自動入力しました！「🔍 自分で分析・予想」タブを開いてください。"
+                    st.rerun()
 
             st.markdown("---")
             
-            # 3. 全場一括：企画通りベスト5（新ロジック：1強 ➔ 2強追従確率順）
+            # 3. 全場一括：企画通りベスト5
             st.markdown("#### 🔵 軸固定！企画通り狙いレース（全場総合トップ5）")
             st.caption("1〜8Rの企画枠限定。データの『相対勝率1位が1着』にきて、かつ『相対勝率2位が2着か3着』にカチッと嵌まる確率が最も高い狙い打ちレースです。")
             
@@ -318,9 +331,11 @@ with tab_ai:
             else:
                 df_kikaku = pd.DataFrame(kikaku_rows).sort_values("kikaku_rate", ascending=False).head(5)
                 for _, row in df_kikaku.iterrows():
-                    btn_label = f"【{row['venue'].split('_')[1]} {int(row['rno'])}R】 1強➔2強追従確率: {int(row['kikaku_rate'])}% ➔"
+                    venue_name_only = row['venue'].split('_')[1]
+                    btn_label = f"【{venue_name_only} {int(row['rno'])}R】 1強➔2強追従確率: {int(row['kikaku_rate'])}% ➔"
                     if st.button(btn_label, key=f"all_btn_kk_{row['venue']}_{row['rno']}"):
                         st.session_state["target_venue"] = row['venue']
                         st.session_state["target_rno"] = str(int(row['rno']))
                         st.session_state["auto_search"] = True
-                        st.success(f"📌 【{row['venue'].split('_')[1]} {int(row['rno'])}R】をセットしました！上の「🔍 自分で分析・予想」タブを開いてください。")
+                        st.session_state["toast_msg"] = f"✅ 【{venue_name_only} {int(row['rno'])}R】を自動入力しました！「🔍 自分で分析・予想」タブを開いてください。"
+                        st.rerun()
