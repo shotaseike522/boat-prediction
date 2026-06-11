@@ -51,10 +51,12 @@ if "target_rno" not in st.session_state:
     st.session_state["target_rno"] = "1"
 if "auto_search" not in st.session_state:
     st.session_state["auto_search"] = False
-if "toast_msg" not in st.session_state:
-    st.session_state["toast_msg"] = None
 if "reset_counter" not in st.session_state:
     st.session_state["reset_counter"] = 0
+    
+# 💡 どのボタンが押されたかを記憶するセッション状態を追加
+if "clicked_btn_key" not in st.session_state:
+    st.session_state["clicked_btn_key"] = None
 
 # --- ⚡ 4. AI厳選用：一括計算キャッシュロジック ---
 @st.cache_data(ttl=1800) 
@@ -108,15 +110,6 @@ def generate_ai_ranking_cached(date_str):
 
 
 # ====================================================
-# 🚀 💡 【今回の最重要改善】どのタブにいても見える画面全体ポップアップ通知
-# ====================================================
-if st.session_state["toast_msg"]:
-    # 画面の目立つ場所にふわっと浮き出るトースト通知を発動（押した瞬間その場で出ます）
-    st.toast(st.session_state["toast_msg"], icon="✅")
-    st.session_state["toast_msg"] = None # 1回表示したらクリア
-
-
-# ====================================================
 # 📱 画面レイアウト（標準 st.tabs 構成）
 # ====================================================
 tab_search, tab_ai = st.tabs(["🔍 自分で分析・予想", "🤖 本日のAI厳選"])
@@ -127,8 +120,7 @@ tab_search, tab_ai = st.tabs(["🔍 自分で分析・予想", "🤖 本日のAI
 with tab_search:
     st.markdown("### 1. レース情報の指定")
     
-    # 💡 UI/UX向上：AI厳選から今セットされている状態であることを薄く明示
-    if st.session_state["auto_search"] or st.session_state.get("last_loaded"):
+    if st.session_state["auto_search"] or st.session_state.get("clicked_btn_key"):
         st.caption(f"💡 現在選択中：{st.session_state['target_venue'].split('_')[1]} {st.session_state['target_rno']}R (AI厳選からの連動状態)")
 
     col1, col2 = st.columns(2)
@@ -176,6 +168,11 @@ with tab_search:
     st.markdown("---")
 
     search_triggered = st.button("類似レースを検索して分析する 🔍", use_container_width=True)
+    
+    # 手動検索が押されたら、AI厳選の「ボタンの下のメッセージ」を消すためにキーを白紙化
+    if search_triggered:
+        st.session_state["clicked_btn_key"] = None
+
     if st.session_state["auto_search"]:
         search_triggered = True
         st.session_state["auto_search"] = False 
@@ -291,15 +288,18 @@ with tab_ai:
             for _, row in df_stable.iterrows():
                 venue_name_only = row['venue'].split('_')[1]
                 btn_label = f"【{venue_name_only} {int(row['rno'])}R】 1000円以下確率: {int(row['honmei_rate'])}% ➔"
+                btn_id = f"st_{row['venue']}_{row['rno']}"
                 
-                if st.button(btn_label, key=f"all_btn_st_{row['venue']}_{row['rno']}"):
+                if st.button(btn_label, key=f"all_btn_{btn_id}"):
                     st.session_state["target_venue"] = row['venue']
                     st.session_state["target_rno"] = str(int(row['rno']))
                     st.session_state["auto_search"] = True
-                    # 💡 【修正点】押した瞬間その場で通知が出るようにメッセージをセット
-                    st.session_state["toast_msg"] = f"【{venue_name_only} {int(row['rno'])}R】をセット完了！上の『🔍 自分で分析・予想』タブを開いてください。"
-                    st.session_state["last_loaded"] = True
+                    st.session_state["clicked_btn_key"] = btn_id # 💡 記憶させる
                     st.rerun()
+                
+                # 💡 【重要改善】クリックされたボタンのすぐ真下にだけ連動テキストを出現させる
+                if st.session_state["clicked_btn_key"] == btn_id:
+                    st.success(f"✅ セット完了！上の『🔍 自分で分析・予想』タブを開いてください。")
                     
             st.markdown("---")
             
@@ -309,9 +309,46 @@ with tab_ai:
             for _, row in df_wild.iterrows():
                 venue_name_only = row['venue'].split('_')[1]
                 btn_label = f"【{venue_name_only} {int(row['rno'])}R】 万舟率: {int(row['manshu_rate'])}% ➔"
-                if st.button(btn_label, key=f"all_btn_wd_{row['venue']}_{row['rno']}"):
+                btn_id = f"wd_{row['venue']}_{row['rno']}"
+                
+                if st.button(btn_label, key=f"all_btn_{btn_id}"):
                     st.session_state["target_venue"] = row['venue']
                     st.session_state["target_rno"] = str(int(row['rno']))
                     st.session_state["auto_search"] = True
-                    st.session_state["toast_msg"] = f"【{venue_name_only} {int(row['rno'])}R】をセット完了！上の『🔍 自分で分析・予想』タブを開いてください。"
-                    st.session_state["last_loaded"] = True
+                    st.session_state["clicked_btn_key"] = btn_id
+                    st.rerun()
+                    
+                if st.session_state["clicked_btn_key"] == btn_id:
+                    st.success(f"✅ セット完了！上の『🔍 自分で分析・予想』タブを開いてください。")
+
+            st.markdown("---")
+            
+            # 3. 全場一括：企画通りベスト5
+            st.markdown("#### 🔵 軸固定！企画通り狙いレース（全場総合トップ5）")
+            st.caption("1〜8Rの企画枠限定。データの『相対勝率1位が1着』にきて、かつ『相対勝率2位が2着か3着』にカチッと嵌まる確率が最も高い狙い打ちレースです。")
+            
+            kikaku_rows = []
+            for _, row in df_all_res.iterrows():
+                if row["rno"] <= 8: 
+                    valid_slots = kikaku_master.get(str(row["jcd"]), {}).get("kikaku_slots", [])
+                    if int(row["rno"]) in valid_slots:
+                        kikaku_rows.append(row)
+            
+            if not kikaku_rows:
+                st.caption("※本日の1〜8レース内に、新ロジックの条件に合うシード企画枠はありません。")
+            else:
+                df_kikaku = pd.DataFrame(kikaku_rows).sort_values("kikaku_rate", ascending=False).head(5)
+                for _, row in df_kikaku.iterrows():
+                    venue_name_only = row['venue'].split('_')[1]
+                    btn_label = f"【{venue_name_only} {int(row['rno'])}R】 1強➔2強追従確率: {int(row['kikaku_rate'])}% ➔"
+                    btn_id = f"kk_{row['venue']}_{row['rno']}"
+                    
+                    if st.button(btn_label, key=f"all_btn_{btn_id}"):
+                        st.session_state["target_venue"] = row['venue']
+                        st.session_state["target_rno"] = str(int(row['rno']))
+                        st.session_state["auto_search"] = True
+                        st.session_state["clicked_btn_key"] = btn_id
+                        st.rerun()
+                        
+                    if st.session_state["clicked_btn_key"] == btn_id:
+                        st.success(f"✅ セット完了！上の『🔍 自分で分析・予想』タブを開いてください。")
