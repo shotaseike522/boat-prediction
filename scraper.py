@@ -22,7 +22,6 @@ def fetch_today_all_races():
         except:
             pass
 
-    # 💡 【高速化化ロジックの統合】
     # 開催一覧ページから、本日開催している競艇場コードだけを事前に引っこ抜く
     index_url = f"https://www.boatrace.jp/owpc/pc/race/index?hd={hd_str}"
     active_jcds = []
@@ -62,16 +61,42 @@ def fetch_today_all_races():
             try:
                 res = requests.get(url, timeout=10)
                 soup = BeautifulSoup(res.content, "html.parser")
-                syouritu_elements = soup.find_all(class_="is-lineH2")
                 
-                if not syouritu_elements or len(syouritu_elements) < 27:
+                # 💡【改良ロジック】6艇それぞれの<tr>ブロックを直接探す
+                # 選手の枠ごとに <tbody class="is-fs12"> で区切られているのを利用する
+                tbodies = soup.find_all("tbody", class_="is-fs12")
+                
+                # 6艇分のデータが見つからない場合はスキップ（非開催など）
+                if len(tbodies) != 6:
                     continue
                     
                 rates = []
-                target_indices = [1, 6, 11, 16, 21, 26] 
-                for i in target_indices:
-                    txt = syouritu_elements[i].text.split('\n')[0]
-                    rates.append(float(txt))
+                
+                for tbody in tbodies:
+                    # その選手のブロックの最初の行 (<tr>) を取得
+                    first_tr = tbody.find("tr")
+                    # 最初の行の中にある列 (<td>) をすべて取得
+                    tds = first_tr.find_all("td", recursive=False)
+                    
+                    # HTML構造上、全国勝率は必ず「左から5番目（インデックス4）」の<td>に入る
+                    if len(tds) > 4:
+                        # <br>を改行としてテキストを抽出し、1行目（勝率）だけを取り出す
+                        txt = tds[4].get_text(separator="\n").strip().split('\n')[0]
+                        
+                        # 💡 セーフティネット: "-.--" や空文字が来たら 0.00 に置換する
+                        if txt == "-.--" or not txt:
+                            rates.append(0.00)
+                        else:
+                            try:
+                                rates.append(float(txt))
+                            except ValueError:
+                                rates.append(0.00)
+                    else:
+                        rates.append(0.00)
+                
+                # 6艇分の勝率が正常に取得できなかった場合はスキップ
+                if len(rates) != 6:
+                    continue
                         
                 mean_rate = sum(rates) / 6
                 rel_rates = [round(r - mean_rate, 3) for r in rates]
