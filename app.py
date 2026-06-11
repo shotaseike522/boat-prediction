@@ -223,7 +223,7 @@ with tab_search:
                     st.markdown("---")
 
                 # ② 全体の真の確率ベスト5
-                st.markdown("## 🏆 真の期待確率ベスト5 (AI正規化済)")
+                st.markdown("## 🏆 期待確率ベスト5")
                 top5_overall = list(true_probs.items())[:5]
                 for i, (combo, prob) in enumerate(top5_overall):
                     st.markdown(f"**第{i+1}位: 【 {combo} 】** （確率: {prob:.1f}%）")
