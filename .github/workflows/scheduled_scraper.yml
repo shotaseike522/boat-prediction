@@ -28,12 +28,14 @@ jobs:
       run: python scraper.py
 
     - name: 選手マスタの部分更新（1日最大50名）
+      continue-on-error: true   # 💡【重要】マスタ更新がエラーでコケても、このステップを無視して次へ進むという最強の保険です
       run: python update_racer_master.py
 
     - name: 変更があった場合のみGitHubに自動上書き保存（Commit & Push）
+      if: always()              # 💡【重要】前段で何が起きても、絶対にこの保存作業だけは実行させる
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add real_time_出走表.csv
-        git add racer_master.csv
+        git add racer_master.csv || true  # 新規作成前でもエラーにならないおまじない
         git diff --cached --quiet || (git commit -m "🤖 自動更新: 本日の出走表 ＆ 選手マスタをアップデート" && git pull --rebase origin main && git push)
