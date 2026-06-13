@@ -21,9 +21,7 @@ def fetch_today_all_races():
         except:
             pass
 
-    # 💡 爆速化の魔法1：Session（通信の使い回し）
     session = requests.Session()
-    # サーバーに怪しまれないようにブラウザのふりをする（オプショナルですが安全性が増します）
     session.headers.update({
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     })
@@ -38,11 +36,8 @@ def fetch_today_all_races():
     }
     
     try:
-        # 💡 Sessionを使ってアクセス ＆ タイムアウト30秒
         res = session.get(index_url, timeout=30)
-        # 💡 爆速化の魔法2：'html.parser' ではなく、より高速なパーサーを指定（※もしエラーが出たら 'html.parser' に戻してOKです）
         soup = BeautifulSoup(res.content, "html.parser") 
-        
         td_list = soup.find_all("td", class_="is-arrow1 is-fBold is-fs15")
         for td in td_list:
             img_tag = td.find("img", alt=True)
@@ -60,12 +55,9 @@ def fetch_today_all_races():
         print(f" └ 競艇場コード [{jcd_str}] の全12レースを解析中...")
         
         for rno in range(1, 13):
-            # 💡 サーバーを守るための1秒待機（これがないとタイムアウト祭になります）
             time.sleep(1)
-            
             url = f"https://www.boatrace.jp/owpc/pc/race/racelist?rno={rno}&jcd={jcd_str}&hd={hd_str}"
             try:
-                # 💡 Sessionを使ってアクセス
                 res = session.get(url, timeout=30)
                 soup = BeautifulSoup(res.content, "html.parser")
                 tbodies = soup.find_all("tbody", class_="is-fs12")
@@ -74,13 +66,33 @@ def fetch_today_all_races():
                     continue
                     
                 rates = []
+                tobans = [] # 💡 登録番号を格納するリストを追加
+                
                 for tbody in tbodies:
                     first_tr = tbody.find("tr")
                     if not first_tr:
                         rates.append(0.00)
+                        tobans.append("")
                         continue
                         
                     tds = first_tr.find_all("td", recursive=False)
+                    
+                    # 💡 【追加】tds[2] から登録番号（例: 5292）を抽出
+                    if len(tds) > 2:
+                        try:
+                            info_div = tds[2].find("div", class_="is-fs11")
+                            if info_div:
+                                txt = info_div.get_text()
+                                toban = txt.split("/")[0].strip() # "5292 / B1" -> "5292"
+                                tobans.append(toban)
+                            else:
+                                tobans.append("")
+                        except:
+                            tobans.append("")
+                    else:
+                        tobans.append("")
+
+                    # 従来の勝率抽出 (tds[4])
                     if len(tds) > 4:
                         txt = tds[4].get_text(separator="\n").strip().split('\n')[0]
                         if txt == "-.--" or not txt:
@@ -99,8 +111,11 @@ def fetch_today_all_races():
                 mean_rate = sum(rates) / 6
                 rel_rates = [round(r - mean_rate, 3) for r in rates]
                 
+                # 💡 登番_1 〜 登番_6 を新しくCSVに出力する
                 all_rows.append({
                     "date": hd_str, "jcd": jcd_int, "r": rno,
+                    "登番_1": tobans[0], "登番_2": tobans[1], "登番_3": tobans[2],
+                    "登番_4": tobans[3], "登番_5": tobans[4], "登番_6": tobans[5],
                     "相対勝率_1": rel_rates[0], "相対勝率_2": rel_rates[1],
                     "相対勝率_3": rel_rates[2], "相対勝率_4": rel_rates[3],
                     "相対勝率_5": rel_rates[4], "相対勝率_6": rel_rates[5]
