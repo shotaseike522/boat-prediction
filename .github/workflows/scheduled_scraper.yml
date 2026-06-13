@@ -24,12 +24,16 @@ jobs:
       run: |
         pip install requests beautifulsoup4 pandas pytz
 
-    - name: スクレイピングを実行
+    - name: スクレイピングを実行（出走表の取得）
       run: python scraper.py
+
+    - name: 選手マスタの部分更新（1日最大50名）
+      run: python update_racer_master.py
 
     - name: 変更があった場合のみGitHubに自動上書き保存（Commit & Push）
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add real_time_出走表.csv
-        git diff --cached --quiet || (git commit -m "🤖 自動更新: 本日の出走表データをアップデート" && git push)
+        git add racer_master.csv
+        git diff --cached --quiet || (git commit -m "🤖 自動更新: 本日の出走表 ＆ 選手マスタをアップデート" && git pull --rebase origin main && git push)
